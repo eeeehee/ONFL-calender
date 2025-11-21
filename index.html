@@ -345,6 +345,7 @@
             color: #333;
         }
 
+        
         .modal-buttons {
             display: flex;
             justify-content: flex-end;
@@ -353,11 +354,10 @@
             align-items: center;
         }
 
-        
         .btn-secondary,
         .modal-buttons .btn-primary {
-            flex: 1;
-            padding: 12px 20px;
+            flex: 0 0 auto;
+            padding: 12px 24px;
             background: #666;
             color: white;
             border: none;
@@ -494,7 +494,6 @@
             margin-top: 10px;
             text-align: center;
         }
-
         .info-message {
             color: #2e7d32;
             font-size: 14px;
@@ -685,7 +684,6 @@
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setError('');
-                setInfo('');
                 try {
                     await auth.signInWithEmailAndPassword(email, password);
                 } catch (err) {
@@ -693,7 +691,25 @@
                 }
             };
 
-            const handlePasswordReset = async () => {<form onSubmit={handleLogin}>
+            const handlePasswordReset = async () => {
+                if (!email) {
+                    setError('비밀번호 변경 링크를 보내기 위해 이메일을 먼저 입력해주세요.');
+                    return;
+                }
+                setError('');
+                setInfo('');
+                try {
+                    await auth.sendPasswordResetEmail(email);
+                    setInfo('입력하신 이메일로 비밀번호 변경(재설정) 링크를 전송했습니다.');
+                } catch (err) {
+                    setError('비밀번호 변경 링크 전송 실패: ' + err.message);
+                }
+            };
+
+            return (
+                <div className="login-container">
+                    <h2>스케쥴 및 연차 관리</h2>
+                    <form onSubmit={handleLogin}>
                         <div className="form-group">
                             <label>이메일</label>
                             <input
@@ -720,19 +736,7 @@
                         </div>
                         {error && <div className="error-message">{error}</div>}
                         {info && <div className="info-message">{info}</div>}
-                    </form>                  <div className="form-group">
-                            <label>비밀번호</label>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                            />
-                        </div>
-                        <button type="submit" className="btn-primary">로그인</button>
-                        {error && <div className="error-message">{error}</div>}
-                    </form>
-                </div>
+                    </form>                </div>
             );
         }
 
