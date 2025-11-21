@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>스케쥴 및 연차 관리</title>
+    <title>openfloor 스케쥴 및 연차 관리</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -345,7 +345,6 @@
             color: #333;
         }
 
-        
         .modal-buttons {
             display: flex;
             justify-content: flex-end;
@@ -354,17 +353,15 @@
             align-items: center;
         }
 
-        .btn-secondary,
-        .modal-buttons .btn-primary {
+        .btn-secondary {
             flex: 0 0 auto;
-            padding: 12px 24px;
+            padding: 12px 20px;
             background: #666;
             color: white;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             font-size: 14px;
-            font-weight: 600;
             height: 48px;
             display: flex;
             align-items: center;
@@ -376,14 +373,18 @@
         }
 
         .modal-buttons .btn-primary {
-            background: #2e7d32;
+            flex: 2;
+            padding: 12px 30px;
+            width: auto;
+            font-size: 15px;
+            font-weight: 600;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        .modal-buttons .btn-primary:hover {
-            background: #1b5e20;
-        }
-
-.annual-leave-info {
+        .annual-leave-info {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
@@ -490,12 +491,6 @@
 
         .error-message {
             color: #ff4444;
-            font-size: 14px;
-            margin-top: 10px;
-            text-align: center;
-        }
-        .info-message {
-            color: #2e7d32;
             font-size: 14px;
             margin-top: 10px;
             text-align: center;
@@ -679,7 +674,6 @@
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
-            const [info, setInfo] = useState('');
 
             const handleLogin = async (e) => {
                 e.preventDefault();
@@ -691,24 +685,9 @@
                 }
             };
 
-            const handlePasswordReset = async () => {
-                if (!email) {
-                    setError('비밀번호 변경 링크를 보내기 위해 이메일을 먼저 입력해주세요.');
-                    return;
-                }
-                setError('');
-                setInfo('');
-                try {
-                    await auth.sendPasswordResetEmail(email);
-                    setInfo('입력하신 이메일로 비밀번호 변경(재설정) 링크를 전송했습니다.');
-                } catch (err) {
-                    setError('비밀번호 변경 링크 전송 실패: ' + err.message);
-                }
-            };
-
             return (
                 <div className="login-container">
-                    <h2>스케쥴 및 연차 관리</h2>
+                    <h2>openfloor 스케쥴 및 연차 관리</h2>
                     <form onSubmit={handleLogin}>
                         <div className="form-group">
                             <label>이메일</label>
@@ -728,15 +707,10 @@
                                 required
                             />
                         </div>
-                        <div className="modal-buttons" style={{ marginTop: '10px', justifyContent: 'space-between' }}>
-                            <button type="button" className="btn-secondary" onClick={handlePasswordReset}>
-                                비밀번호 변경 링크 전송
-                            </button>
-                            <button type="submit" className="btn-primary">로그인</button>
-                        </div>
+                        <button type="submit" className="btn-primary">로그인</button>
                         {error && <div className="error-message">{error}</div>}
-                        {info && <div className="info-message">{info}</div>}
-                    </form>                </div>
+                    </form>
+                </div>
             );
         }
 
@@ -1770,7 +1744,7 @@
             return (
                 <div className="app-container">
                     <div className="header">
-                        <h1>스케쥴 및 연차 관리</h1>
+                        <h1>openfloor 스케쥴 및 연차 관리</h1>
                         <div className="user-info">
                             <span>{user.email}</span>
                             {isAdmin && <span style={{
