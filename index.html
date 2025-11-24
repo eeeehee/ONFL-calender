@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>openfloor 스케쥴 및 연차 관리</title>
+    <title>스케쥴 및 연차 관리</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -240,6 +240,14 @@
             color: #333;
         }
 
+        .calendar td.sunday .date-number {
+            color: #d32f2f;
+        }
+
+        .calendar td.saturday .date-number {
+            color: #1976d2;
+        }
+
         .schedule-item {
             font-size: 11px;
             padding: 3px 6px;
@@ -349,13 +357,12 @@
             display: flex;
             gap: 10px;
             margin-top: 20px;
-            flex-direction: row;
-            align-items: stretch;
         }
 
         .btn-secondary {
             flex: 0 0 auto;
-            padding: 12px 20px;
+            min-width: 80px;
+            padding: 0 20px;
             background: #666;
             color: white;
             border: none;
@@ -366,6 +373,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            box-sizing: border-box;
         }
 
         .btn-secondary:hover {
@@ -373,15 +381,16 @@
         }
 
         .modal-buttons .btn-primary {
-            flex: 2;
-            padding: 12px 30px;
-            width: auto;
+            flex: 1;
+            padding: 0 30px;
             font-size: 15px;
             font-weight: 600;
             height: 48px;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-sizing: border-box;
+            margin: 0;
         }
 
         .annual-leave-info {
@@ -674,20 +683,107 @@
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
+            const [success, setSuccess] = useState('');
+            const [showResetPassword, setShowResetPassword] = useState(false);
+            const [resetEmail, setResetEmail] = useState('');
+            const [rememberEmail, setRememberEmail] = useState(false);
+
+            // 컴포넌트 마운트 시 저장된 이메일 불러오기
+            useEffect(() => {
+                const savedEmail = localStorage.getItem('savedEmail');
+                if (savedEmail) {
+                    setEmail(savedEmail);
+                    setRememberEmail(true);
+                }
+            }, []);
 
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setError('');
                 try {
+                    // 아이디 저장 체크 시 localStorage에 저장
+                    if (rememberEmail) {
+                        localStorage.setItem('savedEmail', email);
+                    } else {
+                        localStorage.removeItem('savedEmail');
+                    }
+                    
                     await auth.signInWithEmailAndPassword(email, password);
                 } catch (err) {
                     setError('로그인 실패: ' + err.message);
                 }
             };
 
+            const handleResetPassword = async (e) => {
+                e.preventDefault();
+                setError('');
+                setSuccess('');
+                
+                if (!resetEmail) {
+                    setError('이메일을 입력해주세요.');
+                    return;
+                }
+
+                try {
+                    await auth.sendPasswordResetEmail(resetEmail);
+                    setSuccess('비밀번호 재설정 이메일이 발송되었습니다. 이메일을 확인해주세요.');
+                    setResetEmail('');
+                    setTimeout(() => {
+                        setShowResetPassword(false);
+                        setSuccess('');
+                    }, 3000);
+                } catch (err) {
+                    if (err.code === 'auth/user-not-found') {
+                        setError('등록되지 않은 이메일입니다.');
+                    } else if (err.code === 'auth/invalid-email') {
+                        setError('유효하지 않은 이메일 형식입니다.');
+                    } else {
+                        setError('비밀번호 재설정 실패: ' + err.message);
+                    }
+                }
+            };
+
+            if (showResetPassword) {
+                return (
+                    <div className="login-container">
+                        <h2>비밀번호 재설정</h2>
+                        <form onSubmit={handleResetPassword}>
+                            <div className="form-group">
+                                <label>이메일</label>
+                                <input
+                                    type="email"
+                                    value={resetEmail}
+                                    onChange={(e) => setResetEmail(e.target.value)}
+                                    placeholder="가입한 이메일을 입력하세요"
+                                    required
+                                />
+                            </div>
+                            <button type="submit" className="btn-primary">재설정 이메일 보내기</button>
+                            <button 
+                                type="button" 
+                                className="btn-primary" 
+                                onClick={() => {
+                                    setShowResetPassword(false);
+                                    setError('');
+                                    setSuccess('');
+                                }}
+                                style={{
+                                    background: '#666',
+                                    marginTop: '10px'
+                                }}
+                            >
+                                로그인으로 돌아가기
+                            </button>
+                            {error && <div className="error-message">{error}</div>}
+                            {success && <div style={{color: '#4CAF50', fontSize: '14px', marginTop: '10px', textAlign: 'center'}}>{success}</div>}
+                        </form>
+                    </div>
+                );
+            }
+
             return (
                 <div className="login-container">
-                    <h2>openfloor 스케쥴 및 연차 관리</h2>
+                    <h2>스케쥴 및 연차 관리</h2>
                     <form onSubmit={handleLogin}>
                         <div className="form-group">
                             <label>이메일</label>
@@ -707,8 +803,52 @@
                                 required
                             />
                         </div>
+                        <div className="form-group" style={{marginBottom: '10px'}}>
+                            <label style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                fontWeight: 'normal'
+                            }}>
+                                <input
+                                    type="checkbox"
+                                    checked={rememberEmail}
+                                    onChange={(e) => setRememberEmail(e.target.checked)}
+                                    style={{
+                                        marginRight: '8px',
+                                        cursor: 'pointer',
+                                        width: '16px',
+                                        height: '16px'
+                                    }}
+                                />
+                                아이디 저장
+                            </label>
+                        </div>
                         <button type="submit" className="btn-primary">로그인</button>
                         {error && <div className="error-message">{error}</div>}
+                        <div style={{
+                            textAlign: 'center',
+                            marginTop: '15px'
+                        }}>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowResetPassword(true);
+                                    setError('');
+                                }}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#4CAF50',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    textDecoration: 'underline'
+                                }}
+                            >
+                                비밀번호를 잊으셨나요?
+                            </button>
+                        </div>
                     </form>
                 </div>
             );
@@ -835,7 +975,9 @@
                     .where('date', '==', date)
                     .get();
 
+                let oldType = null;
                 if (!existingSchedule.empty) {
+                    oldType = existingSchedule.docs[0].data().type;
                     // 업데이트
                     const docId = existingSchedule.docs[0].id;
                     await scheduleRef.doc(docId).update({
@@ -853,7 +995,20 @@
                     });
                 }
 
-                // 연차인 경우 연차 사용 기록
+                // 기존 연차 내역이 있었다면 삭제
+                if (oldType && (oldType === '연차' || oldType === '반차(오전)' || oldType === '반차(오후)' || oldType === '여름휴가' || oldType === '겨울휴가')) {
+                    const oldLeaveUsage = await db.collection('leaveUsage')
+                        .where('userId', '==', user.uid)
+                        .where('date', '==', date)
+                        .where('type', '==', oldType)
+                        .get();
+                    
+                    oldLeaveUsage.forEach(async (doc) => {
+                        await doc.ref.delete();
+                    });
+                }
+
+                // 새로운 타입이 연차인 경우 연차 사용 기록 추가
                 if (type === '연차' || type === '반차(오전)' || type === '반차(오후)' || type === '여름휴가' || type === '겨울휴가') {
                     let leaveAmount = 0;
                     if (type === '연차') {
@@ -923,11 +1078,16 @@
                     const daySchedules = schedules[dateStr] || [];
                     const isToday = isCurrentMonth && today.getDate() === day;
                     const isHoliday = holidays[dateStr];
+                    
+                    // 요일 계산 (0: 일요일, 6: 토요일)
+                    const dayOfWeek = new Date(year, month, day).getDay();
+                    const isSunday = dayOfWeek === 0;
+                    const isSaturday = dayOfWeek === 6;
 
                     days.push(
                         <td
                             key={day}
-                            className={`${isToday ? 'today' : ''} ${isHoliday ? 'holiday' : ''}`}
+                            className={`${isToday ? 'today' : ''} ${isHoliday ? 'holiday' : ''} ${isSunday ? 'sunday' : ''} ${isSaturday ? 'saturday' : ''}`}
                             onClick={() => handleDateClick(day)}
                         >
                             <div className="date-number">{day}</div>
@@ -1744,7 +1904,7 @@
             return (
                 <div className="app-container">
                     <div className="header">
-                        <h1>openfloor 스케쥴 및 연차 관리</h1>
+                        <h1>스케쥴 및 연차 관리</h1>
                         <div className="user-info">
                             <span>{user.email}</span>
                             {isAdmin && <span style={{
