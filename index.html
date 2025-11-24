@@ -966,7 +966,7 @@
                 setShowScheduleModal(true);
             };
 
-            const handleSaveSchedule = async (date, type) => {
+                        const handleSaveSchedule = async (date, type) => {
                 const scheduleRef = db.collection('schedules');
                 
                 // 기존 스케줄 확인
@@ -975,24 +975,36 @@
                     .where('date', '==', date)
                     .get();
 
+                // 연차 관련 타입인지 확인
+                const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(type);
+                const approvalStatus = isLeaveType ? 'pending' : null;
+
                 let oldType = null;
                 if (!existingSchedule.empty) {
                     oldType = existingSchedule.docs[0].data().type;
                     // 업데이트
                     const docId = existingSchedule.docs[0].id;
-                    await scheduleRef.doc(docId).update({
+                    const updateData = {
                         type: type,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                    };
+                    if (isLeaveType) {
+                        updateData.approvalStatus = 'pending';
+                    }
+                    await scheduleRef.doc(docId).update(updateData);
                 } else {
                     // 새로 생성
-                    await scheduleRef.add({
+                    const newScheduleData = {
                         userId: user.uid,
                         userName: user.displayName || user.email,
                         date: date,
                         type: type,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+                    };
+                    if (isLeaveType) {
+                        newScheduleData.approvalStatus = 'pending';
+                    }
+                    await scheduleRef.add(newScheduleData);
                 }
 
                 // 기존 연차 내역이 있었다면 삭제
@@ -1008,7 +1020,7 @@
                     });
                 }
 
-                // 새로운 타입이 연차인 경우 연차 사용 기록 추가
+                // 새로운 타입이 연차인 경우 연차 사용 기록 추가 (승인대기 상태)
                 if (type === '연차' || type === '반차(오전)' || type === '반차(오후)' || type === '여름휴가' || type === '겨울휴가') {
                     let leaveAmount = 0;
                     if (type === '연차') {
@@ -1016,7 +1028,7 @@
                     } else if (type === '반차(오전)' || type === '반차(오후)') {
                         leaveAmount = 0.5;
                     } else if (type === '여름휴가' || type === '겨울휴가') {
-                        leaveAmount = 0; // 연차 수량에 카운트하지 않음
+                        leaveAmount = 0;
                     }
                     
                     await db.collection('leaveUsage').add({
@@ -1024,6 +1036,7 @@
                         date: date,
                         type: type,
                         amount: leaveAmount,
+                        approvalStatus: 'pending',
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                 }
@@ -1092,26 +1105,34 @@
                         >
                             <div className="date-number">{day}</div>
                             {isHoliday && <div className="holiday-name">{isHoliday}</div>}
-                            {daySchedules.map((schedule, idx) => (
-                                <div
-                                    key={idx}
-                                    className={`schedule-item schedule-${schedule.type.replace(/[()]/g, '')}`}
-                                    onClick={(e) => e.stopPropagation()}
-                                >
-                                    <span>{schedule.userName.split('@')[0]} - {schedule.type}</span>
-                                    {schedule.userId === user.uid && (
-                                        <button
-                                            className="delete-schedule-btn"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDeleteSchedule(schedule.id, schedule.date, schedule.type);
-                                            }}
-                                        >
-                                            ✕
-                                        </button>
-                                    )}
-                                </div>
-                            ))}
+                            {daySchedules.map((schedule, idx) => {
+                                // 연차 관련 일정인지 확인
+                                const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(schedule.type);
+                                const statusText = schedule.approvalStatus === 'approved' ? ' (승인완료)' : 
+                                                  schedule.approvalStatus === 'rejected' ? ' (반려)' :
+                                                  schedule.approvalStatus === 'pending' ? ' (승인대기)' : '';
+                                
+                                return (
+                                    <div
+                                        key={idx}
+                                        className={`schedule-item schedule-${schedule.type.replace(/[()]/g, '')}`}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <span>{schedule.userName.split('@')[0]} - {schedule.type}{isLeaveType ? statusText : ''}</span>
+                                        {schedule.userId === user.uid && (
+                                            <button
+                                                className="delete-schedule-btn"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteSchedule(schedule.id, schedule.date, schedule.type);
+                                                }}
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </td>
                     );
 
@@ -1248,7 +1269,10 @@
             };
 
             const calculateUsedLeave = () => {
-                return leaveUsage.reduce((sum, usage) => sum + usage.amount, 0);
+                // 승인된 연차만 카운트
+                return leaveUsage
+                    .filter(usage => usage.approvalStatus === 'approved')
+                    .reduce((sum, usage) => sum + usage.amount, 0);
             };
 
             const handleRegisterLeave = async () => {
@@ -1283,16 +1307,17 @@
                     // 주말 제외 (토요일=6, 일요일=0)
                     const dayOfWeek = currentDate.getDay();
                     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                        // 연차 사용 기록
+                        // 연차 사용 기록 (승인대기 상태)
                         await db.collection('leaveUsage').add({
                             userId: user.uid,
                             date: dateStr,
                             type: leaveType,
                             amount: leaveAmount,
+                            approvalStatus: 'pending',
                             createdAt: firebase.firestore.FieldValue.serverTimestamp()
                         });
 
-                        // 스케줄에 등록
+                        // 스케줄에 등록 (승인대기 상태)
                         const scheduleRef = db.collection('schedules');
                         const existingSchedule = await scheduleRef
                             .where('userId', '==', user.uid)
@@ -1303,6 +1328,7 @@
                             const docId = existingSchedule.docs[0].id;
                             await scheduleRef.doc(docId).update({
                                 type: leaveType,
+                                approvalStatus: 'pending',
                                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
                         } else {
@@ -1311,6 +1337,7 @@
                                 userName: user.displayName || user.email,
                                 date: dateStr,
                                 type: leaveType,
+                                approvalStatus: 'pending',
                                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
                         }
@@ -1320,7 +1347,7 @@
                     currentDate.setDate(currentDate.getDate() + 1);
                 }
 
-                alert('연차가 등록되었습니다.');
+                alert('연차 신청이 완료되었습니다. 승인을 기다려주세요.');
                 setShowRegisterModal(false);
                 setLeaveStartDate('');
                 setLeaveEndDate('');
@@ -1368,6 +1395,7 @@
                                     <th>날짜</th>
                                     <th>유형</th>
                                     <th>사용일수</th>
+                                    <th>승인 상태</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1376,6 +1404,19 @@
                                         <td>{usage.date}</td>
                                         <td>{usage.type}</td>
                                         <td>{usage.amount > 0 ? `${usage.amount}일` : '-'}</td>
+                                        <td>
+                                            <span style={{
+                                                padding: '4px 8px',
+                                                borderRadius: '4px',
+                                                fontSize: '12px',
+                                                background: usage.approvalStatus === 'approved' ? '#4CAF50' : 
+                                                           usage.approvalStatus === 'rejected' ? '#ff4444' : '#ff9800',
+                                                color: 'white'
+                                            }}>
+                                                {usage.approvalStatus === 'approved' ? '승인완료' : 
+                                                 usage.approvalStatus === 'rejected' ? '반려' : '승인대기'}
+                                            </span>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -1482,6 +1523,7 @@
                         email: newEmployee.email,
                         name: newEmployee.name,
                         joinDate: newEmployee.joinDate,
+                        isApprover: false,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
 
@@ -1499,6 +1541,18 @@
                 }
             };
 
+            const handleToggleApprover = async (employeeId, currentStatus) => {
+                try {
+                    await db.collection('employees').doc(employeeId).update({
+                        isApprover: !currentStatus
+                    });
+                    alert('승인자 권한이 ' + (!currentStatus ? '부여' : '해제') + '되었습니다.');
+                    loadEmployees();
+                } catch (error) {
+                    alert('권한 변경 실패: ' + error.message);
+                }
+            };
+
             const handleDeleteEmployee = async (employeeId) => {
                 if (!confirm('정말 삭제하시겠습니까?')) return;
 
@@ -1511,6 +1565,20 @@
                     alert('삭제 실패: ' + error.message);
                 }
             };
+
+            const handleAssignApprover = async (employeeId, approverId) => {
+                try {
+                    await db.collection('employees').doc(employeeId).update({
+                        approver: approverId || null
+                    });
+                    alert('담당 승인자가 할당되었습니다.');
+                    loadEmployees();
+                } catch (error) {
+                    alert('할당 실패: ' + error.message);
+                }
+            };
+
+            const approvers = employees.filter(emp => emp.isApprover);
 
             return (
                 <div className="content-card">
@@ -1527,6 +1595,8 @@
                                         <th>이름</th>
                                         <th>이메일</th>
                                         <th>입사일</th>
+                                        <th>승인자 권한</th>
+                                        <th>담당 승인자</th>
                                         <th>관리</th>
                                     </tr>
                                 </thead>
@@ -1536,6 +1606,49 @@
                                             <td>{emp.name}</td>
                                             <td>{emp.email}</td>
                                             <td>{emp.joinDate}</td>
+                                            <td>
+                                                <label style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    cursor: 'pointer'
+                                                }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={emp.isApprover || false}
+                                                        onChange={() => handleToggleApprover(emp.id, emp.isApprover)}
+                                                        style={{
+                                                            cursor: 'pointer',
+                                                            width: '18px',
+                                                            height: '18px'
+                                                        }}
+                                                    />
+                                                </label>
+                                            </td>
+                                            <td>
+                                                {!emp.isApprover ? (
+                                                    <select
+                                                        value={emp.approver || ''}
+                                                        onChange={(e) => handleAssignApprover(emp.id, e.target.value)}
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '6px',
+                                                            border: '1px solid #ddd',
+                                                            borderRadius: '4px',
+                                                            fontSize: '13px'
+                                                        }}
+                                                    >
+                                                        <option value="">선택 안함</option>
+                                                        {approvers.map(approver => (
+                                                            <option key={approver.id} value={approver.id}>
+                                                                {approver.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <span style={{color: '#999', fontSize: '13px'}}>-</span>
+                                                )}
+                                            </td>
                                             <td>
                                                 <button
                                                     className="delete-btn"
@@ -1602,6 +1715,275 @@
             );
         }
 
+        // 연차 승인 관리 컴포넌트
+        function ApprovalManagement({ user }) {
+            const [pendingRequests, setPendingRequests] = useState([]);
+            const [myEmployees, setMyEmployees] = useState([]);
+
+            useEffect(() => {
+                loadMyEmployees();
+            }, []);
+
+            const loadMyEmployees = async () => {
+                try {
+                    const snapshot = await db.collection('employees')
+                        .where('approver', '==', user.uid)
+                        .get();
+
+                    const employees = [];
+                    snapshot.forEach(doc => {
+                        employees.push({ id: doc.id, ...doc.data() });
+                    });
+                    
+                    setMyEmployees(employees);
+                    
+                    if (employees.length > 0) {
+                        loadPendingRequests(employees.map(emp => emp.id));
+                    }
+                } catch (error) {
+                    console.error('담당 직원 목록 로드 실패:', error);
+                }
+            };
+
+            const loadPendingRequests = async (employeeIds) => {
+                try {
+                    const snapshot = await db.collection('leaveUsage')
+                        .where('approvalStatus', '==', 'pending')
+                        .get();
+
+                    const requests = [];
+                    for (const doc of snapshot.docs) {
+                        const data = doc.data();
+                        
+                        if (employeeIds.includes(data.userId)) {
+                            const userDoc = await db.collection('employees').doc(data.userId).get();
+                            requests.push({
+                                id: doc.id,
+                                ...data,
+                                userName: userDoc.exists ? userDoc.data().name : data.userId
+                            });
+                        }
+                    }
+                    
+                    requests.sort((a, b) => b.date.localeCompare(a.date));
+                    setPendingRequests(requests);
+                } catch (error) {
+                    console.error('승인 대기 목록 로드 실패:', error);
+                }
+            };
+
+            const handleApproval = async (requestId, userId, date, status) => {
+                try {
+                    await db.collection('leaveUsage').doc(requestId).update({
+                        approvalStatus: status,
+                        approvedBy: user.uid,
+                        approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    const scheduleSnapshot = await db.collection('schedules')
+                        .where('userId', '==', userId)
+                        .where('date', '==', date)
+                        .get();
+
+                    scheduleSnapshot.forEach(async (doc) => {
+                        await doc.ref.update({
+                            approvalStatus: status,
+                            approvedBy: user.uid,
+                            approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    });
+
+                    alert(status === 'approved' ? '승인되었습니다.' : '반려되었습니다.');
+                    loadMyEmployees();
+                } catch (error) {
+                    alert('처리 실패: ' + error.message);
+                }
+            };
+
+            return (
+                <div className="content-card">
+                    <h2 style={{marginBottom: '20px'}}>연차 승인 관리</h2>
+                    
+                    <div style={{
+                        background: '#f5f5f5',
+                        padding: '15px',
+                        borderRadius: '8px',
+                        marginBottom: '20px'
+                    }}>
+                        <h3 style={{fontSize: '16px', marginBottom: '10px'}}>담당 직원 목록</h3>
+                        {myEmployees.length > 0 ? (
+                            <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap'}}>
+                                {myEmployees.map(emp => (
+                                    <span key={emp.id} style={{
+                                        background: 'white',
+                                        padding: '6px 12px',
+                                        borderRadius: '4px',
+                                        fontSize: '14px',
+                                        border: '1px solid #ddd'
+                                    }}>
+                                        {emp.name}
+                                    </span>
+                                ))}
+                            </div>
+                        ) : (
+                            <p style={{color: '#666', fontSize: '14px'}}>담당 직원이 없습니다. 관리자에게 문의하세요.</p>
+                        )}
+                    </div>
+                    
+                    <h3 style={{fontSize: '16px', marginBottom: '15px'}}>승인 대기 목록</h3>
+                    {pendingRequests.length > 0 ? (
+                        <div style={{display: 'grid', gap: '15px'}}>
+                            {pendingRequests.map(request => (
+                                <div key={request.id} style={{
+                                    background: 'white',
+                                    border: '1px solid #e0e0e0',
+                                    borderRadius: '12px',
+                                    padding: '20px',
+                                    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                    transition: 'all 0.2s',
+                                    ':hover': {
+                                        boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+                                    }
+                                }}>
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: '1fr 1fr 1fr auto',
+                                        gap: '20px',
+                                        alignItems: 'center'
+                                    }}>
+                                        {/* 직원 정보 */}
+                                        <div>
+                                            <div style={{
+                                                fontSize: '12px',
+                                                color: '#999',
+                                                marginBottom: '4px'
+                                            }}>직원명</div>
+                                            <div style={{
+                                                fontSize: '18px',
+                                                fontWeight: '600',
+                                                color: '#333'
+                                            }}>{request.userName}</div>
+                                        </div>
+
+                                        {/* 연차 정보 */}
+                                        <div>
+                                            <div style={{
+                                                fontSize: '12px',
+                                                color: '#999',
+                                                marginBottom: '4px'
+                                            }}>연차 내용</div>
+                                            <div style={{
+                                                fontSize: '16px',
+                                                fontWeight: '500',
+                                                color: '#333'
+                                            }}>
+                                                {request.type}
+                                                <span style={{
+                                                    marginLeft: '8px',
+                                                    color: '#666',
+                                                    fontSize: '14px'
+                                                }}>
+                                                    ({request.amount > 0 ? `${request.amount}일` : '무급'})
+                                                </span>
+                                            </div>
+                                            <div style={{
+                                                fontSize: '14px',
+                                                color: '#666',
+                                                marginTop: '4px'
+                                            }}>
+                                                📅 {request.date}
+                                            </div>
+                                        </div>
+
+                                        {/* 신청일 */}
+                                        <div>
+                                            <div style={{
+                                                fontSize: '12px',
+                                                color: '#999',
+                                                marginBottom: '4px'
+                                            }}>신청일</div>
+                                            <div style={{
+                                                fontSize: '14px',
+                                                color: '#666'
+                                            }}>
+                                                {request.createdAt ? new Date(request.createdAt.toDate()).toLocaleDateString('ko-KR', {
+                                                    year: 'numeric',
+                                                    month: 'long',
+                                                    day: 'numeric'
+                                                }) : '-'}
+                                            </div>
+                                        </div>
+
+                                        {/* 승인/반려 버튼 */}
+                                        <div style={{display: 'flex', gap: '8px'}}>
+                                            <button
+                                                onClick={() => handleApproval(request.id, request.userId, request.date, 'approved')}
+                                                style={{
+                                                    padding: '10px 20px',
+                                                    background: '#4CAF50',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '14px',
+                                                    fontWeight: '600',
+                                                    transition: 'all 0.2s',
+                                                    minWidth: '80px'
+                                                }}
+                                                onMouseOver={(e) => e.target.style.background = '#45a049'}
+                                                onMouseOut={(e) => e.target.style.background = '#4CAF50'}
+                                            >
+                                                ✓ 승인
+                                            </button>
+                                            <button
+                                                onClick={() => handleApproval(request.id, request.userId, request.date, 'rejected')}
+                                                style={{
+                                                    padding: '10px 20px',
+                                                    background: '#ff4444',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '14px',
+                                                    fontWeight: '600',
+                                                    transition: 'all 0.2s',
+                                                    minWidth: '80px'
+                                                }}
+                                                onMouseOver={(e) => e.target.style.background = '#cc0000'}
+                                                onMouseOut={(e) => e.target.style.background = '#ff4444'}
+                                            >
+                                                ✕ 반려
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div style={{
+                            padding: '80px 20px',
+                            textAlign: 'center',
+                            background: 'white',
+                            borderRadius: '12px',
+                            border: '2px dashed #e0e0e0'
+                        }}>
+                            <div style={{
+                                fontSize: '48px',
+                                marginBottom: '16px'
+                            }}>📋</div>
+                            <div style={{
+                                color: '#999',
+                                fontSize: '16px',
+                                fontWeight: '500'
+                            }}>
+                                승인 대기중인 연차 신청이 없습니다.
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         // 관리자용 직원 연차 관리 컴포넌트
         function AdminLeaveManagement() {
             const [employees, setEmployees] = useState([]);
@@ -1661,7 +2043,10 @@
             };
 
             const calculateUsedLeave = () => {
-                return leaveUsage.reduce((sum, usage) => sum + usage.amount, 0);
+                // 승인된 연차만 카운트
+                return leaveUsage
+                    .filter(usage => usage.approvalStatus === 'approved')
+                    .reduce((sum, usage) => sum + usage.amount, 0);
             };
 
             const handleEditLeave = async () => {
@@ -1861,15 +2246,17 @@
             const [activeTab, setActiveTab] = useState('calendar');
             const [employees, setEmployees] = useState([]);
             const [isAdmin, setIsAdmin] = useState(false);
+            const [isApprover, setIsApprover] = useState(false);
 
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged(async (user) => {
                     setUser(user);
                     if (user) {
-                        // 관리자 권한 확인
+                        // 관리자 및 승인자 권한 확인
                         const employeeDoc = await db.collection('employees').doc(user.uid).get();
                         if (employeeDoc.exists) {
                             setIsAdmin(employeeDoc.data().isAdmin || false);
+                            setIsApprover(employeeDoc.data().isApprover || false);
                         }
                         loadEmployees();
                     }
@@ -1915,6 +2302,14 @@
                                 fontSize: '12px',
                                 marginLeft: '10px'
                             }}>관리자</span>}
+                            {isApprover && <span style={{
+                                background: '#2196F3',
+                                color: 'white',
+                                padding: '4px 8px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                marginLeft: '10px'
+                            }}>승인자</span>}
                             <button className="logout-btn" onClick={handleLogout}>로그아웃</button>
                         </div>
                     </div>
@@ -1932,6 +2327,14 @@
                         >
                             연차 관리
                         </button>
+                        {isApprover && (
+                            <button
+                                className={`tab ${activeTab === 'approval' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('approval')}
+                            >
+                                연차 승인
+                            </button>
+                        )}
                         {isAdmin && (
                             <>
                                 <button
@@ -1952,6 +2355,7 @@
 
                     {activeTab === 'calendar' && <Calendar user={user} employees={employees} />}
                     {activeTab === 'leave' && <AnnualLeave user={user} />}
+                    {activeTab === 'approval' && isApprover && <ApprovalManagement user={user} />}
                     {activeTab === 'admin-leave' && isAdmin && <AdminLeaveManagement />}
                     {activeTab === 'admin' && isAdmin && <AdminPage />}
                 </div>
