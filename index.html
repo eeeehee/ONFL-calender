@@ -680,6 +680,231 @@
             return `${year}-${m}-${d}`;
         };
 
+        // Slack 알림 전송 함수
+        const sendSlackNotification = async (approverUserId, message, type = 'approval') => {
+            try {
+                // Firestore에서 Slack Webhook URL 가져오기
+                const settingsDoc = await db.collection('settings').doc('slack').get();
+                if (!settingsDoc.exists || !settingsDoc.data().webhookUrl) {
+                    console.log('Slack Webhook URL이 설정되지 않았습니다.');
+                    return;
+                }
+
+                const webhookUrl = settingsDoc.data().webhookUrl;
+
+                // 승인자 정보 가져오기
+                const approverDoc = await db.collection('employees').doc(approverUserId).get();
+                if (!approverDoc.exists) {
+                    console.log('승인자 정보를 찾을 수 없습니다.');
+                    return;
+                }
+
+                const approverData = approverDoc.data();
+                const slackUserId = approverData.slackUserId;
+
+                // 메시지 구성
+                let slackMessage = '';
+                if (slackUserId) {
+                    slackMessage = `<@${slackUserId}> ${message}`;
+                } else {
+                    slackMessage = `${approverData.name}님, ${message}`;
+                }
+
+                // Slack에 메시지 전송
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text: slackMessage,
+                        username: '연차관리시스템',
+                        icon_emoji: type === 'approval' ? ':memo:' : ':x:'
+                    })
+                });
+
+                if (!response.ok) {
+                    console.error('Slack 알림 전송 실패:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Slack 알림 전송 중 오류:', error);
+            }
+        };
+
+        // Slack 설정 컴포넌트
+        function SlackSettings() {
+            const [webhookUrl, setWebhookUrl] = useState('');
+            const [loading, setLoading] = useState(true);
+            const [saving, setSaving] = useState(false);
+
+            useEffect(() => {
+                loadSettings();
+            }, []);
+
+            const loadSettings = async () => {
+                try {
+                    const settingsDoc = await db.collection('settings').doc('slack').get();
+                    if (settingsDoc.exists) {
+                        setWebhookUrl(settingsDoc.data().webhookUrl || '');
+                    }
+                    setLoading(false);
+                } catch (error) {
+                    console.error('설정 로드 실패:', error);
+                    setLoading(false);
+                }
+            };
+
+            const handleSaveSettings = async () => {
+                if (!webhookUrl) {
+                    alert('Webhook URL을 입력해주세요.');
+                    return;
+                }
+
+                setSaving(true);
+                try {
+                    await db.collection('settings').doc('slack').set({
+                        webhookUrl: webhookUrl,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    alert('Slack 설정이 저장되었습니다.');
+                } catch (error) {
+                    alert('저장 실패: ' + error.message);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            const handleTestNotification = async () => {
+                if (!webhookUrl) {
+                    alert('먼저 Webhook URL을 저장해주세요.');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(webhookUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            text: '✅ 테스트 메시지입니다. Slack 연동이 정상적으로 작동합니다!',
+                            username: '연차관리시스템',
+                            icon_emoji: ':white_check_mark:'
+                        })
+                    });
+
+                    if (response.ok) {
+                        alert('테스트 메시지가 전송되었습니다. Slack을 확인해주세요.');
+                    } else {
+                        alert('테스트 메시지 전송 실패. Webhook URL을 확인해주세요.');
+                    }
+                } catch (error) {
+                    alert('전송 실패: ' + error.message);
+                }
+            };
+
+            if (loading) {
+                return <div className="content-card">로딩중...</div>;
+            }
+
+            return (
+                <div className="content-card">
+                    <h2 style={{marginBottom: '20px'}}>Slack 연동 설정</h2>
+                    
+                    <div style={{maxWidth: '800px'}}>
+                        <div style={{
+                            background: '#e8f5e9',
+                            padding: '20px',
+                            borderRadius: '8px',
+                            marginBottom: '30px',
+                            border: '1px solid #4CAF50'
+                        }}>
+                            <h3 style={{fontSize: '16px', marginBottom: '15px', color: '#2e7d32'}}>📋 Slack 설정 가이드</h3>
+                            <ol style={{fontSize: '14px', lineHeight: '1.8', color: '#333', paddingLeft: '20px'}}>
+                                <li><a href="https://api.slack.com/apps" target="_blank" style={{color: '#1976d2'}}>https://api.slack.com/apps</a> 접속</li>
+                                <li>"Create New App" → "From scratch" 선택</li>
+                                <li>App 이름 입력 (예: 연차관리시스템)</li>
+                                <li>좌측 "Incoming Webhooks" 클릭 → "Activate Incoming Webhooks" ON</li>
+                                <li>"Add New Webhook to Workspace" 클릭</li>
+                                <li>알림을 받을 채널 선택 (예: #연차-알림)</li>
+                                <li>생성된 Webhook URL을 아래에 입력</li>
+                            </ol>
+                        </div>
+
+                        <div className="form-group">
+                            <label style={{fontSize: '16px', fontWeight: '600', marginBottom: '10px', display: 'block'}}>
+                                Slack Webhook URL
+                            </label>
+                            <input
+                                type="text"
+                                value={webhookUrl}
+                                onChange={(e) => setWebhookUrl(e.target.value)}
+                                placeholder="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXX"
+                                style={{
+                                    width: '100%',
+                                    padding: '12px',
+                                    fontSize: '14px',
+                                    border: '1px solid #ddd',
+                                    borderRadius: '6px',
+                                    fontFamily: 'monospace'
+                                }}
+                            />
+                        </div>
+
+                        <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
+                            <button
+                                onClick={handleSaveSettings}
+                                disabled={saving}
+                                style={{
+                                    padding: '12px 24px',
+                                    background: '#4CAF50',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    cursor: saving ? 'not-allowed' : 'pointer',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    opacity: saving ? 0.6 : 1
+                                }}
+                            >
+                                {saving ? '저장중...' : '저장'}
+                            </button>
+                            <button
+                                onClick={handleTestNotification}
+                                style={{
+                                    padding: '12px 24px',
+                                    background: '#2196F3',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    fontWeight: '600'
+                                }}
+                            >
+                                테스트 메시지 보내기
+                            </button>
+                        </div>
+
+                        <div style={{
+                            marginTop: '30px',
+                            padding: '15px',
+                            background: '#fff3e0',
+                            borderRadius: '8px',
+                            border: '1px solid #ff9800'
+                        }}>
+                            <h4 style={{fontSize: '14px', marginBottom: '10px', color: '#e65100'}}>💡 멘션 기능 사용하기</h4>
+                            <p style={{fontSize: '13px', color: '#666', lineHeight: '1.6', margin: 0}}>
+                                사원 관리에서 각 사원의 Slack 사용자 ID를 등록하면, 알림 시 해당 사원에게 멘션(@)이 포함됩니다.
+                                <br />
+                                Slack 사용자 ID는 Slack에서 사용자 프로필 → ⋯ (더보기) → "Copy member ID"로 확인할 수 있습니다.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         // 로그인 컴포넌트
         function Login({ onLogin }) {
             const [email, setEmail] = useState('');
@@ -1538,6 +1763,12 @@
                                 });
                             });
                             
+                            // 승인자에게 Slack 알림
+                            if (employeeInfo?.approver) {
+                                const slackMessage = `${employeeInfo.name}님이 연차 취소 승인 요청을 보냈습니다.\n날짜: ${usageDate}\n유형: ${usageType}`;
+                                await sendSlackNotification(employeeInfo.approver, slackMessage, 'cancellation');
+                            }
+                            
                             alert('취소 승인 요청이 완료되었습니다.');
                         }
                     } else if (approvalStatus === 'pending') {
@@ -1675,6 +1906,14 @@
                     ? '연차 등록이 완료되었습니다.' 
                     : '연차 신청이 완료되었습니다. 승인을 기다려주세요.';
                 alert(message);
+                
+                // 일반 사원이 연차 신청한 경우 승인자에게 Slack 알림
+                if (!employeeInfo?.isApprover && employeeInfo?.approver) {
+                    const days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+                    const slackMessage = `${employeeInfo.name}님이 연차 승인 요청을 보냈습니다.\n기간: ${leaveStartDate} ~ ${leaveEndDate} (${days}일)\n유형: ${leaveType}`;
+                    await sendSlackNotification(employeeInfo.approver, slackMessage, 'approval');
+                }
+                
                 setShowRegisterModal(false);
                 setLeaveStartDate('');
                 setLeaveEndDate('');
@@ -1854,7 +2093,8 @@
                 name: '',
                 phone: '',
                 joinDate: '',
-                password: ''
+                password: '',
+                slackUserId: ''
             });
 
             useEffect(() => {
@@ -1898,7 +2138,7 @@
 
             const handleAddEmployee = async () => {
                 if (!newEmployee.email || !newEmployee.name || !newEmployee.phone || !newEmployee.joinDate || !newEmployee.password) {
-                    alert('모든 필드를 입력해주세요.');
+                    alert('필수 필드를 입력해주세요.');
                     return;
                 }
 
@@ -1925,6 +2165,7 @@
                         name: newEmployee.name,
                         phone: newEmployee.phone,
                         joinDate: newEmployee.joinDate,
+                        slackUserId: newEmployee.slackUserId || '',
                         isApprover: false,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
@@ -1939,7 +2180,7 @@
 
                     alert('사원이 추가되었습니다.');
                     setShowAddModal(false);
-                    setNewEmployee({ email: '', name: '', phone: '', joinDate: '', password: '' });
+                    setNewEmployee({ email: '', name: '', phone: '', joinDate: '', password: '', slackUserId: '' });
                     loadEmployees();
                 } catch (error) {
                     alert('사원 추가 실패: ' + error.message);
@@ -1981,7 +2222,8 @@
                         name: updatedData.name,
                         email: updatedData.email,
                         phone: updatedData.phone,
-                        joinDate: updatedData.joinDate
+                        joinDate: updatedData.joinDate,
+                        slackUserId: updatedData.slackUserId || ''
                     });
                     alert('사원 정보가 수정되었습니다.');
                     setEditingEmployeeId(null);
@@ -2035,6 +2277,7 @@
                                         <th>이메일</th>
                                         <th>연락처</th>
                                         <th>입사일</th>
+                                        <th>Slack ID</th>
                                         <th>승인자 권한</th>
                                         <th>결재선 선택</th>
                                         <th>관리</th>
@@ -2088,6 +2331,17 @@
                                                 ) : emp.joinDate}
                                             </td>
                                             <td>
+                                                {editingEmployeeId === emp.id ? (
+                                                    <input
+                                                        type="text"
+                                                        defaultValue={emp.slackUserId || ''}
+                                                        id={`slackUserId-${emp.id}`}
+                                                        placeholder="U01234ABCDE"
+                                                        style={{width: '100%', padding: '4px', fontSize: '12px'}}
+                                                    />
+                                                ) : (emp.slackUserId || '-')}
+                                            </td>
+                                            <td>
                                                 <label style={{
                                                     display: 'flex',
                                                     alignItems: 'center',
@@ -2139,7 +2393,8 @@
                                                                 const email = document.getElementById(`email-${emp.id}`).value;
                                                                 const phone = document.getElementById(`phone-${emp.id}`).value;
                                                                 const joinDate = document.getElementById(`joinDate-${emp.id}`).value;
-                                                                handleSaveEmployee(emp.id, {name, email, phone, joinDate});
+                                                                const slackUserId = document.getElementById(`slackUserId-${emp.id}`).value;
+                                                                handleSaveEmployee(emp.id, {name, email, phone, joinDate, slackUserId});
                                                             }}
                                                             style={{
                                                                 padding: '6px 12px',
@@ -2245,6 +2500,18 @@
                                         value={newEmployee.joinDate}
                                         onChange={(e) => setNewEmployee({...newEmployee, joinDate: e.target.value})}
                                     />
+                                </div>
+                                <div className="form-group">
+                                    <label>Slack 사용자 ID (선택)</label>
+                                    <input
+                                        type="text"
+                                        value={newEmployee.slackUserId}
+                                        onChange={(e) => setNewEmployee({...newEmployee, slackUserId: e.target.value})}
+                                        placeholder="예: U01234ABCDE"
+                                    />
+                                    <small style={{fontSize: '12px', color: '#666', display: 'block', marginTop: '5px'}}>
+                                        Slack에서 사용자 프로필 → ⋯ → "Copy member ID"
+                                    </small>
                                 </div>
                                 <div className="modal-buttons">
                                     <button className="btn-secondary" onClick={() => setShowAddModal(false)}>
@@ -3726,6 +3993,12 @@
                                 >
                                     사원 관리
                                 </button>
+                                <button
+                                    className={`tab ${activeTab === 'slack-settings' ? 'active' : ''}`}
+                                    onClick={() => setActiveTab('slack-settings')}
+                                >
+                                    Slack 설정
+                                </button>
                             </>
                         )}
                     </div>
@@ -3736,6 +4009,7 @@
                     {activeTab === 'admin-leave' && isAdmin && <AdminLeaveManagement />}
                     {activeTab === 'approval-line' && isAdmin && <ApprovalLineManagement />}
                     {activeTab === 'admin' && isAdmin && <AdminPage />}
+                    {activeTab === 'slack-settings' && isAdmin && <SlackSettings />}
                 </div>
             );
         }
