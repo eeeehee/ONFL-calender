@@ -906,13 +906,22 @@
             const [selectedDate, setSelectedDate] = useState(null);
             const [selectedDaySchedules, setSelectedDaySchedules] = useState([]);
             const [showScheduleModal, setShowScheduleModal] = useState(false);
+            const [employeeInfo, setEmployeeInfo] = useState(null);
 
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth();
 
             useEffect(() => {
+                loadEmployeeInfo();
                 loadSchedules();
             }, [year, month]);
+
+            const loadEmployeeInfo = async () => {
+                const doc = await db.collection('employees').doc(user.uid).get();
+                if (doc.exists) {
+                    setEmployeeInfo(doc.data());
+                }
+            };
 
             useEffect(() => {
                 // 오늘 날짜의 일정을 자동으로 표시
@@ -924,7 +933,9 @@
             useEffect(() => {
                 // selectedDate가 변경될 때마다 해당 날짜의 일정 표시
                 if (selectedDate && schedules[selectedDate]) {
-                    setSelectedDaySchedules(schedules[selectedDate]);
+                    const rawDaySchedules = schedules[selectedDate];
+                    const filteredDaySchedules = rawDaySchedules.filter(s => s.approvalStatus !== 'cancelled' && s.approvalStatus !== 'deletion-pending');
+                    setSelectedDaySchedules(filteredDaySchedules);
                 } else if (selectedDate) {
                     setSelectedDaySchedules([]);
                 }
@@ -979,7 +990,8 @@
 
                 // 연차 관련 타입인지 확인
                 const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(type);
-                const approvalStatus = isLeaveType ? 'pending' : null;
+                // 승인자는 자동 승인, 일반 사원은 승인 대기
+                const approvalStatus = isLeaveType ? (employeeInfo?.isApprover ? 'approved' : 'pending') : null;
 
                 let oldType = null;
                 if (!existingSchedule.empty) {
@@ -991,7 +1003,12 @@
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     if (isLeaveType) {
-                        updateData.approvalStatus = 'pending';
+                        // 연차/반차/휴가 타입인 경우 승인 상태 설정
+                        updateData.approvalStatus = approvalStatus;
+                    } else {
+                        // 일반 스케줄(출근/재택 등)로 다시 등록하는 경우
+                        // 이전에 남아있던 cancelled / deletion-pending 상태를 초기화
+                        updateData.approvalStatus = null;
                     }
                     await scheduleRef.doc(docId).update(updateData);
                 } else {
@@ -1004,7 +1021,7 @@
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     };
                     if (isLeaveType) {
-                        newScheduleData.approvalStatus = 'pending';
+                        newScheduleData.approvalStatus = approvalStatus;
                     }
                     await scheduleRef.add(newScheduleData);
                 }
@@ -1018,11 +1035,14 @@
                         .get();
                     
                     oldLeaveUsage.forEach(async (doc) => {
-                        await doc.ref.delete();
+                        await doc.ref.update({
+                            approvalStatus: 'cancelled',
+                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
                     });
                 }
 
-                // 새로운 타입이 연차인 경우 연차 사용 기록 추가 (승인대기 상태)
+                // 새로운 타입이 연차인 경우 연차 사용 기록 추가
                 if (type === '연차' || type === '반차(오전)' || type === '반차(오후)' || type === '여름휴가' || type === '겨울휴가') {
                     let leaveAmount = 0;
                     if (type === '연차') {
@@ -1038,7 +1058,7 @@
                         date: date,
                         type: type,
                         amount: leaveAmount,
-                        approvalStatus: 'pending',
+                        approvalStatus: approvalStatus,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
                 }
@@ -1048,28 +1068,102 @@
             };
 
             const handleDeleteSchedule = async (scheduleId, scheduleDate, scheduleType) => {
-                if (!confirm('이 일정을 삭제하시겠습니까?')) return;
-
                 try {
-                    // 스케줄 삭제
-                    await db.collection('schedules').doc(scheduleId).delete();
+                    // 스케줄 정보 가져오기
+                    const scheduleDoc = await db.collection('schedules').doc(scheduleId).get();
+                    const scheduleData = scheduleDoc.data();
+                    
+                    // 연차 관련 일정인지 확인
+                    const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(scheduleType);
+                    
+                    if (isLeaveType) {
+                        const isApprover = employeeInfo?.isApprover;
+                        
+                        if (scheduleData.approvalStatus === 'approved') {
+                            if (isApprover) {
+                                // 승인자는 즉시 취소
+                                if (!confirm('이 연차를 취소하시겠습니까?')) return;
+                                
+                                await db.collection('schedules').doc(scheduleId).update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
 
-                    // 연차인 경우 연차 사용 기록도 삭제
-                    if (scheduleType === '연차' || scheduleType === '반차(오전)' || scheduleType === '반차(오후)' || scheduleType === '여름휴가' || scheduleType === '겨울휴가') {
-                        const leaveUsageSnapshot = await db.collection('leaveUsage')
-                            .where('userId', '==', user.uid)
-                            .where('date', '==', scheduleDate)
-                            .where('type', '==', scheduleType)
-                            .get();
+                                const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                    .where('userId', '==', user.uid)
+                                    .where('date', '==', scheduleDate)
+                                    .where('type', '==', scheduleType)
+                                    .get();
 
-                        leaveUsageSnapshot.forEach(async (doc) => {
-                            await doc.ref.delete();
+                                leaveUsageSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'cancelled',
+                                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+                                
+                                alert('연차가 취소되었습니다.');
+                            } else {
+                                // 일반 사원은 취소 승인 요청
+                                if (!confirm('승인 완료된 연차입니다. 취소 승인을 요청하시겠습니까?')) return;
+                                
+                                await db.collection('schedules').doc(scheduleId).update({
+                                    approvalStatus: 'deletion-pending',
+                                    deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+
+                                const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                    .where('userId', '==', user.uid)
+                                    .where('date', '==', scheduleDate)
+                                    .where('type', '==', scheduleType)
+                                    .get();
+
+                                leaveUsageSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'deletion-pending',
+                                        deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+                                
+                                alert('취소 승인 요청이 완료되었습니다.');
+                            }
+                        } else {
+                            // 승인대기 또는 기타 상태는 즉시 취소
+                            if (!confirm('이 일정을 취소하시겠습니까?')) return;
+                            
+                            await db.collection('schedules').doc(scheduleId).update({
+                                approvalStatus: 'cancelled',
+                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+
+                            const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                .where('userId', '==', user.uid)
+                                .where('date', '==', scheduleDate)
+                                .where('type', '==', scheduleType)
+                                .get();
+
+                            leaveUsageSnapshot.forEach(async (doc) => {
+                                await doc.ref.update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            });
+                            
+                            alert('일정이 취소되었습니다.');
+                        }
+                    } else {
+                        // 일반 일정은 바로 취소
+                        if (!confirm('이 일정을 취소하시겠습니까?')) return;
+                        
+                        await db.collection('schedules').doc(scheduleId).update({
+                            approvalStatus: 'cancelled',
+                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
                         });
                     }
 
                     loadSchedules();
                 } catch (error) {
-                    alert('삭제 실패: ' + error.message);
+                    alert('취소 실패: ' + error.message);
                 }
             };
 
@@ -1090,7 +1184,8 @@
 
                 for (let day = 1; day <= daysInMonth; day++) {
                     const dateStr = formatDate(year, month, day);
-                    const daySchedules = schedules[dateStr] || [];
+                    const rawDaySchedules = schedules[dateStr] || [];
+                    const daySchedules = rawDaySchedules.filter(s => s.approvalStatus !== 'cancelled' && s.approvalStatus !== 'deletion-pending');
                     const isToday = isCurrentMonth && today.getDate() === day;
                     const isHoliday = holidays[dateStr];
                     
@@ -1112,7 +1207,9 @@
                                 const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(schedule.type);
                                 const statusText = schedule.approvalStatus === 'approved' ? ' (승인완료)' : 
                                                   schedule.approvalStatus === 'rejected' ? ' (반려)' :
-                                                  schedule.approvalStatus === 'pending' ? ' (승인대기)' : '';
+                                                  schedule.approvalStatus === 'pending' ? ' (승인대기)' :
+                                                  schedule.approvalStatus === 'deletion-pending' ? ' (취소대기)' :
+                                                  schedule.approvalStatus === 'cancelled' ? ' (취소됨)' : '';
                                 
                                 return (
                                     <div
@@ -1213,6 +1310,115 @@
             );
         }
 
+        // 페이지네이션 컴포넌트
+        function Pagination({ currentPage, totalPages, onPageChange }) {
+            const pages = [];
+            const maxVisible = 5;
+            
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+            
+            if (endPage - startPage < maxVisible - 1) {
+                startPage = Math.max(1, endPage - maxVisible + 1);
+            }
+            
+            for (let i = startPage; i <= endPage; i++) {
+                pages.push(i);
+            }
+            
+            return (
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginTop: '20px'
+                }}>
+                    <button
+                        onClick={() => onPageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        style={{
+                            padding: '8px 12px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            background: currentPage === 1 ? '#f5f5f5' : 'white',
+                            cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
+                        }}
+                    >
+                        이전
+                    </button>
+                    
+                    {startPage > 1 && (
+                        <>
+                            <button
+                                onClick={() => onPageChange(1)}
+                                style={{
+                                    padding: '8px 12px',
+                                    border: '1px solid #ddd',
+                                    borderRadius: '4px',
+                                    background: 'white',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                1
+                            </button>
+                            {startPage > 2 && <span>...</span>}
+                        </>
+                    )}
+                    
+                    {pages.map(page => (
+                        <button
+                            key={page}
+                            onClick={() => onPageChange(page)}
+                            style={{
+                                padding: '8px 12px',
+                                border: '1px solid #ddd',
+                                borderRadius: '4px',
+                                background: currentPage === page ? '#4CAF50' : 'white',
+                                color: currentPage === page ? 'white' : 'black',
+                                cursor: 'pointer',
+                                fontWeight: currentPage === page ? '600' : 'normal'
+                            }}
+                        >
+                            {page}
+                        </button>
+                    ))}
+                    
+                    {endPage < totalPages && (
+                        <>
+                            {endPage < totalPages - 1 && <span>...</span>}
+                            <button
+                                onClick={() => onPageChange(totalPages)}
+                                style={{
+                                    padding: '8px 12px',
+                                    border: '1px solid #ddd',
+                                    borderRadius: '4px',
+                                    background: 'white',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                {totalPages}
+                            </button>
+                        </>
+                    )}
+                    
+                    <button
+                        onClick={() => onPageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        style={{
+                            padding: '8px 12px',
+                            border: '1px solid #ddd',
+                            borderRadius: '4px',
+                            background: currentPage === totalPages ? '#f5f5f5' : 'white',
+                            cursor: currentPage === totalPages ? 'not-allowed' : 'pointer'
+                        }}
+                    >
+                        다음
+                    </button>
+                </div>
+            );
+        }
+
         // 연차 관리 컴포넌트
         function AnnualLeave({ user }) {
             const [employeeInfo, setEmployeeInfo] = useState(null);
@@ -1221,6 +1427,8 @@
             const [leaveStartDate, setLeaveStartDate] = useState('');
             const [leaveEndDate, setLeaveEndDate] = useState('');
             const [leaveType, setLeaveType] = useState('연차');
+            const [currentPage, setCurrentPage] = useState(1);
+            const itemsPerPage = 10;
 
             useEffect(() => {
                 loadEmployeeInfo();
@@ -1271,10 +1479,121 @@
             };
 
             const calculateUsedLeave = () => {
-                // 승인된 연차만 카운트
+                // 승인완료와 승인대기(pending) 모두 카운트
                 return leaveUsage
-                    .filter(usage => usage.approvalStatus === 'approved')
+                    .filter(usage => usage.approvalStatus === 'approved' || usage.approvalStatus === 'pending')
                     .reduce((sum, usage) => sum + usage.amount, 0);
+            };
+
+            const handleDeleteLeave = async (usageId, usageDate, usageType, approvalStatus) => {
+                try {
+                    const isApprover = employeeInfo?.isApprover;
+
+                    if (approvalStatus === 'approved') {
+                        // 승인완료된 연차 취소
+                        if (isApprover) {
+                            // 승인자는 즉시 취소 처리
+                            if (!confirm('이 연차를 취소하시겠습니까?')) return;
+                            
+                            await db.collection('leaveUsage').doc(usageId).update({
+                                approvalStatus: 'cancelled',
+                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+
+                            // 스케줄도 취소 상태로 변경
+                            const scheduleSnapshot = await db.collection('schedules')
+                                .where('userId', '==', user.uid)
+                                .where('date', '==', usageDate)
+                                .where('type', '==', usageType)
+                                .get();
+
+                            scheduleSnapshot.forEach(async (doc) => {
+                                await doc.ref.update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            });
+                            
+                            alert('연차가 취소되었습니다.');
+                        } else {
+                            // 일반 사원은 취소 승인 요청
+                            if (!confirm('승인 완료된 연차입니다. 취소 승인을 요청하시겠습니까?')) return;
+                            
+                            await db.collection('leaveUsage').doc(usageId).update({
+                                approvalStatus: 'deletion-pending',
+                                deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+
+                            // 스케줄도 취소 대기로 변경
+                            const scheduleSnapshot = await db.collection('schedules')
+                                .where('userId', '==', user.uid)
+                                .where('date', '==', usageDate)
+                                .where('type', '==', usageType)
+                                .get();
+
+                            scheduleSnapshot.forEach(async (doc) => {
+                                await doc.ref.update({
+                                    approvalStatus: 'deletion-pending',
+                                    deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            });
+                            
+                            alert('취소 승인 요청이 완료되었습니다.');
+                        }
+                    } else if (approvalStatus === 'pending') {
+                        // 승인대기 연차는 즉시 취소
+                        if (!confirm('이 연차 신청을 취소하시겠습니까?')) return;
+                        
+                        await db.collection('leaveUsage').doc(usageId).update({
+                            approvalStatus: 'cancelled',
+                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+
+                        // 스케줄도 취소 상태로 변경
+                        const scheduleSnapshot = await db.collection('schedules')
+                            .where('userId', '==', user.uid)
+                            .where('date', '==', usageDate)
+                            .where('type', '==', usageType)
+                            .get();
+
+                        scheduleSnapshot.forEach(async (doc) => {
+                            await doc.ref.update({
+                                approvalStatus: 'cancelled',
+                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+                        });
+                        
+                        alert('연차 신청이 취소되었습니다.');
+                    } else {
+                        // 반려되거나 취소대기 상태는 즉시 취소
+                        if (!confirm('이 연차 내역을 취소하시겠습니까?')) return;
+                        
+                        await db.collection('leaveUsage').doc(usageId).update({
+                            approvalStatus: 'cancelled',
+                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+
+                        const scheduleSnapshot = await db.collection('schedules')
+                            .where('userId', '==', user.uid)
+                            .where('date', '==', usageDate)
+                            .where('type', '==', usageType)
+                            .get();
+
+                        scheduleSnapshot.forEach(async (doc) => {
+                            await doc.ref.update({
+                                approvalStatus: 'cancelled',
+                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+                        });
+                        
+                        alert('취소되었습니다.');
+                    }
+
+                    loadLeaveUsage();
+                    loadEmployeeInfo();
+                } catch (error) {
+                    alert('처리 실패: ' + error.message);
+                }
             };
 
             const handleRegisterLeave = async () => {
@@ -1290,6 +1609,9 @@
                     alert('종료일은 시작일보다 늦어야 합니다.');
                     return;
                 }
+
+                // 승인자는 자동 승인, 일반 사원은 승인 대기
+                const approvalStatus = employeeInfo?.isApprover ? 'approved' : 'pending';
 
                 // 휴가 유형에 따른 연차 수량 계산
                 let leaveAmount = 0;
@@ -1309,17 +1631,17 @@
                     // 주말 제외 (토요일=6, 일요일=0)
                     const dayOfWeek = currentDate.getDay();
                     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                        // 연차 사용 기록 (승인대기 상태)
+                        // 연차 사용 기록
                         await db.collection('leaveUsage').add({
                             userId: user.uid,
                             date: dateStr,
                             type: leaveType,
                             amount: leaveAmount,
-                            approvalStatus: 'pending',
+                            approvalStatus: approvalStatus,
                             createdAt: firebase.firestore.FieldValue.serverTimestamp()
                         });
 
-                        // 스케줄에 등록 (승인대기 상태)
+                        // 스케줄에 등록
                         const scheduleRef = db.collection('schedules');
                         const existingSchedule = await scheduleRef
                             .where('userId', '==', user.uid)
@@ -1330,7 +1652,7 @@
                             const docId = existingSchedule.docs[0].id;
                             await scheduleRef.doc(docId).update({
                                 type: leaveType,
-                                approvalStatus: 'pending',
+                                approvalStatus: approvalStatus,
                                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
                         } else {
@@ -1339,7 +1661,7 @@
                                 userName: user.displayName || user.email,
                                 date: dateStr,
                                 type: leaveType,
-                                approvalStatus: 'pending',
+                                approvalStatus: approvalStatus,
                                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
                         }
@@ -1349,7 +1671,10 @@
                     currentDate.setDate(currentDate.getDate() + 1);
                 }
 
-                alert('연차 신청이 완료되었습니다. 승인을 기다려주세요.');
+                const message = employeeInfo?.isApprover 
+                    ? '연차 등록이 완료되었습니다.' 
+                    : '연차 신청이 완료되었습니다. 승인을 기다려주세요.';
+                alert(message);
                 setShowRegisterModal(false);
                 setLeaveStartDate('');
                 setLeaveEndDate('');
@@ -1357,7 +1682,7 @@
             };
 
             if (!employeeInfo) {
-                return <div className="content-card">직원 정보를 불러오는 중...</div>;
+                return <div className="content-card">사원 정보를 불러오는 중...</div>;
             }
 
             const totalLeave = employeeInfo.customTotalLeave || calculateTotalLeave(employeeInfo.joinDate);
@@ -1398,31 +1723,66 @@
                                     <th>유형</th>
                                     <th>사용일수</th>
                                     <th>승인 상태</th>
+                                    <th>관리</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {leaveUsage.map(usage => (
-                                    <tr key={usage.id}>
-                                        <td>{usage.date}</td>
-                                        <td>{usage.type}</td>
-                                        <td>{usage.amount > 0 ? `${usage.amount}일` : '-'}</td>
-                                        <td>
-                                            <span style={{
-                                                padding: '4px 8px',
-                                                borderRadius: '4px',
-                                                fontSize: '12px',
-                                                background: usage.approvalStatus === 'approved' ? '#4CAF50' : 
-                                                           usage.approvalStatus === 'rejected' ? '#ff4444' : '#ff9800',
-                                                color: 'white'
-                                            }}>
-                                                {usage.approvalStatus === 'approved' ? '승인완료' : 
-                                                 usage.approvalStatus === 'rejected' ? '반려' : '승인대기'}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {(() => {
+                                    const startIndex = (currentPage - 1) * itemsPerPage;
+                                    const endIndex = startIndex + itemsPerPage;
+                                    const currentItems = leaveUsage.slice(startIndex, endIndex);
+                                    return currentItems.map(usage => (
+                                        <tr key={usage.id}>
+                                            <td>{usage.date}</td>
+                                            <td>{usage.type}</td>
+                                            <td>{usage.amount > 0 ? `${usage.amount}일` : '-'}</td>
+                                            <td>
+                                                <span style={{
+                                                    padding: '4px 8px',
+                                                    borderRadius: '4px',
+                                                    fontSize: '12px',
+                                                    background: usage.approvalStatus === 'approved' ? '#4CAF50' : 
+                                                               usage.approvalStatus === 'rejected' ? '#ff4444' :
+                                                               usage.approvalStatus === 'deletion-pending' ? '#9c27b0' :
+                                                               usage.approvalStatus === 'cancelled' ? '#999' : '#ff9800',
+                                                    color: 'white'
+                                                }}>
+                                                    {usage.approvalStatus === 'approved' ? '승인완료' : 
+                                                     usage.approvalStatus === 'rejected' ? '반려' :
+                                                     usage.approvalStatus === 'deletion-pending' ? '취소대기' :
+                                                     usage.approvalStatus === 'cancelled' ? '취소됨' : '승인대기'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                {(usage.approvalStatus !== 'deletion-pending' && usage.approvalStatus !== 'cancelled') && (
+                                                    <button
+                                                        onClick={() => handleDeleteLeave(usage.id, usage.date, usage.type, usage.approvalStatus)}
+                                                        style={{
+                                                            padding: '4px 8px',
+                                                            background: '#ff4444',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '4px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '12px'
+                                                        }}
+                                                    >
+                                                        취소
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ));
+                                })()}
                             </tbody>
                         </table>
+                        {leaveUsage.length > itemsPerPage && (
+                            <Pagination
+                                currentPage={currentPage}
+                                totalPages={Math.ceil(leaveUsage.length / itemsPerPage)}
+                                onPageChange={setCurrentPage}
+                            />
+                        )}
                     </div>
 
                     {showRegisterModal && (
@@ -1487,9 +1847,11 @@
         function AdminPage() {
             const [employees, setEmployees] = useState([]);
             const [showAddModal, setShowAddModal] = useState(false);
+            const [editingEmployeeId, setEditingEmployeeId] = useState(null);
             const [newEmployee, setNewEmployee] = useState({
                 email: '',
                 name: '',
+                phone: '',
                 joinDate: '',
                 password: ''
             });
@@ -1497,6 +1859,22 @@
             useEffect(() => {
                 loadEmployees();
             }, []);
+
+            const formatPhoneNumber = (value) => {
+                // 숫자만 추출
+                const numbers = value.replace(/[^\d]/g, '');
+                
+                // 길이에 따라 포맷팅
+                if (numbers.length <= 3) {
+                    return numbers;
+                } else if (numbers.length <= 7) {
+                    return `${numbers.slice(0, 3)}-${numbers.slice(3)}`;
+                } else if (numbers.length <= 11) {
+                    return `${numbers.slice(0, 3)}-${numbers.slice(3, 7)}-${numbers.slice(7)}`;
+                } else {
+                    return `${numbers.slice(0, 3)}-${numbers.slice(3, 7)}-${numbers.slice(7, 11)}`;
+                }
+            };
 
             const loadEmployees = async () => {
                 const snapshot = await db.collection('employees').get();
@@ -1508,22 +1886,33 @@
             };
 
             const handleAddEmployee = async () => {
-                if (!newEmployee.email || !newEmployee.name || !newEmployee.joinDate || !newEmployee.password) {
+                if (!newEmployee.email || !newEmployee.name || !newEmployee.phone || !newEmployee.joinDate || !newEmployee.password) {
                     alert('모든 필드를 입력해주세요.');
                     return;
                 }
 
                 try {
+                    // 현재 로그인된 관리자 정보 저장
+                    const currentUser = auth.currentUser;
+                    const currentEmail = currentUser.email;
+                    const currentPassword = prompt('관리자 비밀번호를 입력하세요 (계정 유지를 위해 필요합니다):');
+                    
+                    if (!currentPassword) {
+                        alert('비밀번호가 필요합니다.');
+                        return;
+                    }
+
                     // Firebase Auth에 사용자 생성
                     const userCredential = await auth.createUserWithEmailAndPassword(
                         newEmployee.email,
                         newEmployee.password
                     );
 
-                    // Firestore에 직원 정보 저장
+                    // Firestore에 사원 정보 저장
                     await db.collection('employees').doc(userCredential.user.uid).set({
                         email: newEmployee.email,
                         name: newEmployee.name,
+                        phone: newEmployee.phone,
                         joinDate: newEmployee.joinDate,
                         isApprover: false,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1534,12 +1923,15 @@
                         displayName: newEmployee.name
                     });
 
-                    alert('직원이 추가되었습니다.');
+                    // 관리자 계정으로 다시 로그인
+                    await auth.signInWithEmailAndPassword(currentEmail, currentPassword);
+
+                    alert('사원이 추가되었습니다.');
                     setShowAddModal(false);
-                    setNewEmployee({ email: '', name: '', joinDate: '', password: '' });
+                    setNewEmployee({ email: '', name: '', phone: '', joinDate: '', password: '' });
                     loadEmployees();
                 } catch (error) {
-                    alert('직원 추가 실패: ' + error.message);
+                    alert('사원 추가 실패: ' + error.message);
                 }
             };
 
@@ -1561,11 +1953,35 @@
                 try {
                     await db.collection('employees').doc(employeeId).delete();
                     // Note: Firebase Auth의 사용자 삭제는 Admin SDK가 필요합니다
-                    alert('직원이 삭제되었습니다.');
+                    alert('사원이 삭제되었습니다.');
                     loadEmployees();
                 } catch (error) {
                     alert('삭제 실패: ' + error.message);
                 }
+            };
+
+            const handleEditEmployee = (employeeId) => {
+                setEditingEmployeeId(employeeId);
+            };
+
+            const handleSaveEmployee = async (employeeId, updatedData) => {
+                try {
+                    await db.collection('employees').doc(employeeId).update({
+                        name: updatedData.name,
+                        email: updatedData.email,
+                        phone: updatedData.phone,
+                        joinDate: updatedData.joinDate
+                    });
+                    alert('사원 정보가 수정되었습니다.');
+                    setEditingEmployeeId(null);
+                    loadEmployees();
+                } catch (error) {
+                    alert('수정 실패: ' + error.message);
+                }
+            };
+
+            const handleCancelEdit = () => {
+                setEditingEmployeeId(null);
             };
 
             const handleAssignApprover = async (employeeId, approverId) => {
@@ -1585,9 +2001,9 @@
             return (
                 <div className="content-card">
                     <div className="admin-section">
-                        <h3>직원 관리</h3>
+                        <h3>사원 관리</h3>
                         <button className="register-btn" onClick={() => setShowAddModal(true)}>
-                            직원 추가
+                            사원 추가
                         </button>
 
                         <div className="employee-list">
@@ -1596,6 +2012,7 @@
                                     <tr>
                                         <th>이름</th>
                                         <th>이메일</th>
+                                        <th>연락처</th>
                                         <th>입사일</th>
                                         <th>승인자 권한</th>
                                         <th>담당 승인자</th>
@@ -1605,9 +2022,50 @@
                                 <tbody>
                                     {employees.map(emp => (
                                         <tr key={emp.id}>
-                                            <td>{emp.name}</td>
-                                            <td>{emp.email}</td>
-                                            <td>{emp.joinDate}</td>
+                                            <td>
+                                                {editingEmployeeId === emp.id ? (
+                                                    <input
+                                                        type="text"
+                                                        defaultValue={emp.name}
+                                                        id={`name-${emp.id}`}
+                                                        style={{width: '100%', padding: '4px'}}
+                                                    />
+                                                ) : emp.name}
+                                            </td>
+                                            <td>
+                                                {editingEmployeeId === emp.id ? (
+                                                    <input
+                                                        type="email"
+                                                        defaultValue={emp.email}
+                                                        id={`email-${emp.id}`}
+                                                        style={{width: '100%', padding: '4px'}}
+                                                    />
+                                                ) : emp.email}
+                                            </td>
+                                            <td>
+                                                {editingEmployeeId === emp.id ? (
+                                                    <input
+                                                        type="text"
+                                                        defaultValue={emp.phone}
+                                                        id={`phone-${emp.id}`}
+                                                        style={{width: '100%', padding: '4px'}}
+                                                        maxLength="13"
+                                                        onInput={(e) => {
+                                                            e.target.value = formatPhoneNumber(e.target.value);
+                                                        }}
+                                                    />
+                                                ) : (emp.phone || '-')}
+                                            </td>
+                                            <td>
+                                                {editingEmployeeId === emp.id ? (
+                                                    <input
+                                                        type="date"
+                                                        defaultValue={emp.joinDate}
+                                                        id={`joinDate-${emp.id}`}
+                                                        style={{width: '100%', padding: '4px'}}
+                                                    />
+                                                ) : emp.joinDate}
+                                            </td>
                                             <td>
                                                 <label style={{
                                                     display: 'flex',
@@ -1652,12 +2110,67 @@
                                                 )}
                                             </td>
                                             <td>
-                                                <button
-                                                    className="delete-btn"
-                                                    onClick={() => handleDeleteEmployee(emp.id)}
-                                                >
-                                                    삭제
-                                                </button>
+                                                {editingEmployeeId === emp.id ? (
+                                                    <div style={{display: 'flex', gap: '5px'}}>
+                                                        <button
+                                                            onClick={() => {
+                                                                const name = document.getElementById(`name-${emp.id}`).value;
+                                                                const email = document.getElementById(`email-${emp.id}`).value;
+                                                                const phone = document.getElementById(`phone-${emp.id}`).value;
+                                                                const joinDate = document.getElementById(`joinDate-${emp.id}`).value;
+                                                                handleSaveEmployee(emp.id, {name, email, phone, joinDate});
+                                                            }}
+                                                            style={{
+                                                                padding: '6px 12px',
+                                                                background: '#4CAF50',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            저장
+                                                        </button>
+                                                        <button
+                                                            onClick={handleCancelEdit}
+                                                            style={{
+                                                                padding: '6px 12px',
+                                                                background: '#999',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            취소
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{display: 'flex', gap: '5px'}}>
+                                                        <button
+                                                            onClick={() => handleEditEmployee(emp.id)}
+                                                            style={{
+                                                                padding: '6px 12px',
+                                                                background: '#2196F3',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            수정
+                                                        </button>
+                                                        <button
+                                                            className="delete-btn"
+                                                            onClick={() => handleDeleteEmployee(emp.id)}
+                                                        >
+                                                            삭제
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
@@ -1669,7 +2182,7 @@
                     {showAddModal && (
                         <div className="modal" onClick={() => setShowAddModal(false)}>
                             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                                <h3>직원 추가</h3>
+                                <h3>사원 추가</h3>
                                 <div className="form-group">
                                     <label>이름</label>
                                     <input
@@ -1684,6 +2197,16 @@
                                         type="email"
                                         value={newEmployee.email}
                                         onChange={(e) => setNewEmployee({...newEmployee, email: e.target.value})}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>연락처</label>
+                                    <input
+                                        type="text"
+                                        value={newEmployee.phone}
+                                        onChange={(e) => setNewEmployee({...newEmployee, phone: formatPhoneNumber(e.target.value)})}
+                                        placeholder="010-1234-5678"
+                                        maxLength="13"
                                     />
                                 </div>
                                 <div className="form-group">
@@ -1718,7 +2241,7 @@
         }
 
         // 연차 승인 관리 컴포넌트
-        function ApprovalManagement({ user }) {
+        function ApprovalManagement({ user, setPendingCount }) {
             const [pendingRequests, setPendingRequests] = useState([]);
             const [myEmployees, setMyEmployees] = useState([]);
 
@@ -1743,32 +2266,56 @@
                         loadPendingRequests(employees.map(emp => emp.id));
                     }
                 } catch (error) {
-                    console.error('담당 직원 목록 로드 실패:', error);
+                    console.error('담당 사원 목록 로드 실패:', error);
                 }
             };
 
             const loadPendingRequests = async (employeeIds) => {
                 try {
-                    const snapshot = await db.collection('leaveUsage')
+                    // pending과 deletion-pending 모두 조회
+                    const pendingSnapshot = await db.collection('leaveUsage')
                         .where('approvalStatus', '==', 'pending')
+                        .get();
+                    
+                    const deletionSnapshot = await db.collection('leaveUsage')
+                        .where('approvalStatus', '==', 'deletion-pending')
                         .get();
 
                     const requests = [];
-                    for (const doc of snapshot.docs) {
+                    
+                    // pending 처리
+                    for (const doc of pendingSnapshot.docs) {
                         const data = doc.data();
-                        
                         if (employeeIds.includes(data.userId)) {
                             const userDoc = await db.collection('employees').doc(data.userId).get();
                             requests.push({
                                 id: doc.id,
                                 ...data,
-                                userName: userDoc.exists ? userDoc.data().name : data.userId
+                                userName: userDoc.exists ? userDoc.data().name : data.userId,
+                                requestType: 'approval'
+                            });
+                        }
+                    }
+                    
+                    // deletion-pending 처리
+                    for (const doc of deletionSnapshot.docs) {
+                        const data = doc.data();
+                        if (employeeIds.includes(data.userId)) {
+                            const userDoc = await db.collection('employees').doc(data.userId).get();
+                            requests.push({
+                                id: doc.id,
+                                ...data,
+                                userName: userDoc.exists ? userDoc.data().name : data.userId,
+                                requestType: 'deletion'
                             });
                         }
                     }
                     
                     requests.sort((a, b) => b.date.localeCompare(a.date));
                     setPendingRequests(requests);
+                    if (setPendingCount) {
+                        setPendingCount(requests.length);
+                    }
                 } catch (error) {
                     console.error('승인 대기 목록 로드 실패:', error);
                 }
@@ -1802,6 +2349,60 @@
                 }
             };
 
+            const handleDeletionApproval = async (requestId, userId, date) => {
+                try {
+                    // 취소 승인 - cancelled 상태로 변경
+                    await db.collection('leaveUsage').doc(requestId).update({
+                        approvalStatus: 'cancelled',
+                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    const scheduleSnapshot = await db.collection('schedules')
+                        .where('userId', '==', userId)
+                        .where('date', '==', date)
+                        .get();
+
+                    scheduleSnapshot.forEach(async (doc) => {
+                        await doc.ref.update({
+                            approvalStatus: 'cancelled',
+                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    });
+
+                    alert('취소가 승인되었습니다.');
+                    loadMyEmployees();
+                    loadPendingRequests();
+                } catch (error) {
+                    alert('처리 실패: ' + error.message);
+                }
+            };
+
+            const handleDeletionRejection = async (requestId, userId, date) => {
+                try {
+                    // 취소 반려 - 원래 승인완료 상태로 복구
+                    await db.collection('leaveUsage').doc(requestId).update({
+                        approvalStatus: 'approved'
+                    });
+
+                    const scheduleSnapshot = await db.collection('schedules')
+                        .where('userId', '==', userId)
+                        .where('date', '==', date)
+                        .get();
+
+                    scheduleSnapshot.forEach(async (doc) => {
+                        await doc.ref.update({
+                            approvalStatus: 'approved'
+                        });
+                    });
+
+                    alert('취소가 반려되었습니다.');
+                    loadMyEmployees();
+                    loadPendingRequests();
+                } catch (error) {
+                    alert('처리 실패: ' + error.message);
+                }
+            };
+
             return (
                 <div className="content-card">
                     <h2 style={{marginBottom: '20px'}}>연차 승인 관리</h2>
@@ -1812,7 +2413,7 @@
                         borderRadius: '8px',
                         marginBottom: '20px'
                     }}>
-                        <h3 style={{fontSize: '16px', marginBottom: '10px'}}>담당 직원 목록</h3>
+                        <h3 style={{fontSize: '16px', marginBottom: '10px'}}>담당 사원 목록</h3>
                         {myEmployees.length > 0 ? (
                             <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap'}}>
                                 {myEmployees.map(emp => (
@@ -1828,7 +2429,7 @@
                                 ))}
                             </div>
                         ) : (
-                            <p style={{color: '#666', fontSize: '14px'}}>담당 직원이 없습니다. 관리자에게 문의하세요.</p>
+                            <p style={{color: '#666', fontSize: '14px'}}>담당 사원이 없습니다. 관리자에게 문의하세요.</p>
                         )}
                     </div>
                     
@@ -1853,13 +2454,13 @@
                                         gap: '20px',
                                         alignItems: 'center'
                                     }}>
-                                        {/* 직원 정보 */}
+                                        {/* 사원 정보 */}
                                         <div>
                                             <div style={{
                                                 fontSize: '12px',
                                                 color: '#999',
                                                 marginBottom: '4px'
-                                            }}>직원명</div>
+                                            }}>사원명</div>
                                             <div style={{
                                                 fontSize: '18px',
                                                 fontWeight: '600',
@@ -1873,12 +2474,24 @@
                                                 fontSize: '12px',
                                                 color: '#999',
                                                 marginBottom: '4px'
-                                            }}>연차 내용</div>
+                                            }}>
+                                                {request.requestType === 'deletion' ? '🗑️ 삭제 요청' : '연차 내용'}
+                                            </div>
                                             <div style={{
                                                 fontSize: '16px',
                                                 fontWeight: '500',
                                                 color: '#333'
                                             }}>
+                                                {request.requestType === 'deletion' && (
+                                                    <span style={{
+                                                        background: '#ff4444',
+                                                        color: 'white',
+                                                        padding: '2px 8px',
+                                                        borderRadius: '4px',
+                                                        fontSize: '12px',
+                                                        marginRight: '8px'
+                                                    }}>취소 요청</span>
+                                                )}
                                                 {request.type}
                                                 <span style={{
                                                     marginLeft: '8px',
@@ -1918,44 +2531,89 @@
 
                                         {/* 승인/반려 버튼 */}
                                         <div style={{display: 'flex', gap: '8px'}}>
-                                            <button
-                                                onClick={() => handleApproval(request.id, request.userId, request.date, 'approved')}
-                                                style={{
-                                                    padding: '10px 20px',
-                                                    background: '#4CAF50',
-                                                    color: 'white',
-                                                    border: 'none',
-                                                    borderRadius: '8px',
-                                                    cursor: 'pointer',
-                                                    fontSize: '14px',
-                                                    fontWeight: '600',
-                                                    transition: 'all 0.2s',
-                                                    minWidth: '80px'
-                                                }}
-                                                onMouseOver={(e) => e.target.style.background = '#45a049'}
-                                                onMouseOut={(e) => e.target.style.background = '#4CAF50'}
-                                            >
-                                                ✓ 승인
-                                            </button>
-                                            <button
-                                                onClick={() => handleApproval(request.id, request.userId, request.date, 'rejected')}
-                                                style={{
-                                                    padding: '10px 20px',
-                                                    background: '#ff4444',
-                                                    color: 'white',
-                                                    border: 'none',
-                                                    borderRadius: '8px',
-                                                    cursor: 'pointer',
-                                                    fontSize: '14px',
-                                                    fontWeight: '600',
-                                                    transition: 'all 0.2s',
-                                                    minWidth: '80px'
-                                                }}
-                                                onMouseOver={(e) => e.target.style.background = '#cc0000'}
-                                                onMouseOut={(e) => e.target.style.background = '#ff4444'}
-                                            >
-                                                ✕ 반려
-                                            </button>
+                                            {request.requestType === 'deletion' ? (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleDeletionApproval(request.id, request.userId, request.date)}
+                                                        style={{
+                                                            padding: '10px 20px',
+                                                            background: '#4CAF50',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '8px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '14px',
+                                                            fontWeight: '600',
+                                                            transition: 'all 0.2s',
+                                                            minWidth: '100px'
+                                                        }}
+                                                        onMouseOver={(e) => e.target.style.background = '#45a049'}
+                                                        onMouseOut={(e) => e.target.style.background = '#4CAF50'}
+                                                    >
+                                                        ✓ 삭제 승인
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeletionRejection(request.id, request.userId, request.date)}
+                                                        style={{
+                                                            padding: '10px 20px',
+                                                            background: '#ff4444',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '8px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '14px',
+                                                            fontWeight: '600',
+                                                            transition: 'all 0.2s',
+                                                            minWidth: '100px'
+                                                        }}
+                                                        onMouseOver={(e) => e.target.style.background = '#cc0000'}
+                                                        onMouseOut={(e) => e.target.style.background = '#ff4444'}
+                                                    >
+                                                        ✕ 삭제 반려
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleApproval(request.id, request.userId, request.date, 'approved')}
+                                                        style={{
+                                                            padding: '10px 20px',
+                                                            background: '#4CAF50',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '8px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '14px',
+                                                            fontWeight: '600',
+                                                            transition: 'all 0.2s',
+                                                            minWidth: '80px'
+                                                        }}
+                                                        onMouseOver={(e) => e.target.style.background = '#45a049'}
+                                                        onMouseOut={(e) => e.target.style.background = '#4CAF50'}
+                                                    >
+                                                        ✓ 승인
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleApproval(request.id, request.userId, request.date, 'rejected')}
+                                                        style={{
+                                                            padding: '10px 20px',
+                                                            background: '#ff4444',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '8px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '14px',
+                                                            fontWeight: '600',
+                                                            transition: 'all 0.2s',
+                                                            minWidth: '80px'
+                                                        }}
+                                                        onMouseOver={(e) => e.target.style.background = '#cc0000'}
+                                                        onMouseOut={(e) => e.target.style.background = '#ff4444'}
+                                                    >
+                                                        ✕ 반려
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -1986,13 +2644,17 @@
             );
         }
 
-        // 관리자용 직원 연차 관리 컴포넌트
+        // 관리자용 사원 연차 관리 컴포넌트
         function AdminLeaveManagement() {
             const [employees, setEmployees] = useState([]);
             const [selectedEmployee, setSelectedEmployee] = useState(null);
             const [leaveUsage, setLeaveUsage] = useState([]);
-            const [showEditModal, setShowEditModal] = useState(false);
-            const [editLeaveData, setEditLeaveData] = useState({ totalLeave: 0 });
+            const [currentPage, setCurrentPage] = useState(1);
+            const itemsPerPage = 10;
+            const [editingTotalLeave, setEditingTotalLeave] = useState(false);
+            const [tempTotalLeave, setTempTotalLeave] = useState(0);
+            const [editingUsedLeave, setEditingUsedLeave] = useState(false);
+            const [tempUsedLeave, setTempUsedLeave] = useState(0);
 
             useEffect(() => {
                 loadEmployees();
@@ -2045,37 +2707,107 @@
             };
 
             const calculateUsedLeave = () => {
+                // customUsedLeave가 설정되어 있으면 그 값 사용
+                if (selectedEmployee?.customUsedLeave !== undefined && selectedEmployee?.customUsedLeave !== null) {
+                    return selectedEmployee.customUsedLeave;
+                }
                 // 승인된 연차만 카운트
                 return leaveUsage
                     .filter(usage => usage.approvalStatus === 'approved')
                     .reduce((sum, usage) => sum + usage.amount, 0);
             };
 
-            const handleEditLeave = async () => {
+            const handleDeleteUsedLeave = async (usageId, usageDate, usageType) => {
+                if (!confirm('이 연차 내역을 취소하시겠습니까?')) return;
+
+                try {
+                    // leaveUsage를 취소 상태로 변경
+                    await db.collection('leaveUsage').doc(usageId).update({
+                        approvalStatus: 'cancelled',
+                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    // 해당 날짜의 스케줄도 취소 상태로 변경
+                    const scheduleSnapshot = await db.collection('schedules')
+                        .where('userId', '==', selectedEmployee.id)
+                        .where('date', '==', usageDate)
+                        .where('type', '==', usageType)
+                        .get();
+
+                    scheduleSnapshot.forEach(async (doc) => {
+                        await doc.ref.update({
+                            approvalStatus: 'cancelled',
+                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    });
+
+                    alert('취소되었습니다.');
+                    loadEmployeeLeaveUsage(selectedEmployee.id);
+                } catch (error) {
+                    alert('취소 실패: ' + error.message);
+                }
+            };
+
+            const handleStartEditTotalLeave = () => {
+                setTempTotalLeave(selectedEmployee.customTotalLeave || calculateTotalLeave(selectedEmployee.joinDate));
+                setEditingTotalLeave(true);
+            };
+
+            const handleSaveTotalLeave = async () => {
                 if (!selectedEmployee) return;
 
                 try {
                     await db.collection('employees').doc(selectedEmployee.id).update({
-                        customTotalLeave: parseFloat(editLeaveData.totalLeave)
+                        customTotalLeave: parseFloat(tempTotalLeave)
                     });
 
                     alert('연차 수량이 수정되었습니다.');
-                    setShowEditModal(false);
+                    setEditingTotalLeave(false);
                     loadEmployees();
-                    handleSelectEmployee({ ...selectedEmployee, customTotalLeave: parseFloat(editLeaveData.totalLeave) });
+                    handleSelectEmployee({ ...selectedEmployee, customTotalLeave: parseFloat(tempTotalLeave) });
                 } catch (error) {
                     alert('수정 실패: ' + error.message);
                 }
             };
 
+            const handleCancelEditTotalLeave = () => {
+                setEditingTotalLeave(false);
+            };
+
+            const handleStartEditUsedLeave = () => {
+                setTempUsedLeave(calculateUsedLeave());
+                setEditingUsedLeave(true);
+            };
+
+            const handleSaveUsedLeave = async () => {
+                if (!selectedEmployee) return;
+
+                try {
+                    await db.collection('employees').doc(selectedEmployee.id).update({
+                        customUsedLeave: parseFloat(tempUsedLeave)
+                    });
+
+                    alert('사용 연차가 수정되었습니다.');
+                    setEditingUsedLeave(false);
+                    loadEmployees();
+                    handleSelectEmployee({ ...selectedEmployee, customUsedLeave: parseFloat(tempUsedLeave) });
+                } catch (error) {
+                    alert('수정 실패: ' + error.message);
+                }
+            };
+
+            const handleCancelEditUsedLeave = () => {
+                setEditingUsedLeave(false);
+            };
+
             return (
                 <div className="content-card">
-                    <h2 style={{marginBottom: '20px'}}>직원 연차 관리</h2>
+                    <h2 style={{marginBottom: '20px'}}>사원 연차 관리</h2>
                     
                     <div style={{display: 'grid', gridTemplateColumns: '300px 1fr', gap: '30px'}}>
-                        {/* 직원 목록 */}
+                        {/* 사원 목록 */}
                         <div>
-                            <h3 style={{marginBottom: '15px', fontSize: '16px'}}>직원 목록</h3>
+                            <h3 style={{marginBottom: '15px', fontSize: '16px'}}>사원 목록</h3>
                             <div style={{
                                 border: '1px solid #ddd',
                                 borderRadius: '8px',
@@ -2111,7 +2843,7 @@
                             </div>
                         </div>
 
-                        {/* 선택된 직원의 연차 정보 */}
+                        {/* 선택된 사원의 연차 정보 */}
                         <div>
                             {selectedEmployee ? (
                                 <>
@@ -2122,17 +2854,6 @@
                                         marginBottom: '20px'
                                     }}>
                                         <h3 style={{fontSize: '18px'}}>{selectedEmployee.name}님의 연차 현황</h3>
-                                        <button
-                                            className="register-btn"
-                                            onClick={() => {
-                                                setEditLeaveData({
-                                                    totalLeave: selectedEmployee.customTotalLeave || calculateTotalLeave(selectedEmployee.joinDate)
-                                                });
-                                                setShowEditModal(true);
-                                            }}
-                                        >
-                                            연차 수량 수정
-                                        </button>
                                     </div>
 
                                     <div className="annual-leave-info">
@@ -2142,13 +2863,141 @@
                                         </div>
                                         <div className="info-card">
                                             <h4>총 연차</h4>
-                                            <div className="value">
-                                                {selectedEmployee.customTotalLeave || calculateTotalLeave(selectedEmployee.joinDate)}일
+                                            <div className="value" style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                                                {editingTotalLeave ? (
+                                                    <>
+                                                        <input
+                                                            type="number"
+                                                            value={tempTotalLeave}
+                                                            onChange={(e) => setTempTotalLeave(e.target.value)}
+                                                            style={{
+                                                                width: '80px',
+                                                                padding: '5px',
+                                                                fontSize: '16px',
+                                                                border: '2px solid #4CAF50',
+                                                                borderRadius: '4px'
+                                                            }}
+                                                            autoFocus
+                                                        />
+                                                        <button
+                                                            onClick={handleSaveTotalLeave}
+                                                            style={{
+                                                                padding: '5px 10px',
+                                                                background: '#4CAF50',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            저장
+                                                        </button>
+                                                        <button
+                                                            onClick={handleCancelEditTotalLeave}
+                                                            style={{
+                                                                padding: '5px 10px',
+                                                                background: '#999',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            취소
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {selectedEmployee.customTotalLeave || calculateTotalLeave(selectedEmployee.joinDate)}일
+                                                        <button
+                                                            onClick={handleStartEditTotalLeave}
+                                                            style={{
+                                                                padding: '4px 10px',
+                                                                background: '#2196F3',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px',
+                                                                marginLeft: '10px'
+                                                            }}
+                                                        >
+                                                            수정
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="info-card">
                                             <h4>사용 연차</h4>
-                                            <div className="value">{calculateUsedLeave()}일</div>
+                                            <div className="value" style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                                                {editingUsedLeave ? (
+                                                    <>
+                                                        <input
+                                                            type="number"
+                                                            value={tempUsedLeave}
+                                                            onChange={(e) => setTempUsedLeave(e.target.value)}
+                                                            style={{
+                                                                width: '80px',
+                                                                padding: '5px',
+                                                                fontSize: '16px',
+                                                                border: '2px solid #FF9800',
+                                                                borderRadius: '4px'
+                                                            }}
+                                                            autoFocus
+                                                        />
+                                                        <button
+                                                            onClick={handleSaveUsedLeave}
+                                                            style={{
+                                                                padding: '5px 10px',
+                                                                background: '#4CAF50',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            저장
+                                                        </button>
+                                                        <button
+                                                            onClick={handleCancelEditUsedLeave}
+                                                            style={{
+                                                                padding: '5px 10px',
+                                                                background: '#999',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            취소
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {calculateUsedLeave()}일
+                                                        <button
+                                                            onClick={handleStartEditUsedLeave}
+                                                            style={{
+                                                                padding: '4px 10px',
+                                                                background: '#FF9800',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px',
+                                                                marginLeft: '10px'
+                                                            }}
+                                                        >
+                                                            수정
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="info-card">
                                             <h4>남은 연차</h4>
@@ -2161,24 +3010,68 @@
                                     <div className="leave-history" style={{marginTop: '30px'}}>
                                         <h3>연차 사용 내역</h3>
                                         {leaveUsage.length > 0 ? (
+                                            <>
                                             <table>
                                                 <thead>
                                                     <tr>
                                                         <th>날짜</th>
                                                         <th>유형</th>
                                                         <th>사용일수</th>
+                                                        <th>비고</th>
+                                                        <th>승인 상태</th>
+                                                        <th>관리</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {leaveUsage.map(usage => (
-                                                        <tr key={usage.id}>
-                                                            <td>{usage.date}</td>
-                                                            <td>{usage.type}</td>
-                                                            <td>{usage.amount > 0 ? `${usage.amount}일` : '-'}</td>
-                                                        </tr>
-                                                    ))}
+                                                    {(() => {
+                                                        const startIndex = (currentPage - 1) * itemsPerPage;
+                                                        const endIndex = startIndex + itemsPerPage;
+                                                        const currentItems = leaveUsage.slice(startIndex, endIndex);
+                                                        return currentItems.map(usage => (
+                                                            <tr key={usage.id}>
+                                                                <td>{usage.date}</td>
+                                                                <td>{usage.type}</td>
+                                                                <td>{usage.amount > 0 ? `${usage.amount}일` : '-'}</td>
+                                                                <td>{usage.note || '-'}</td>
+                                                                <td>
+                                                                    <span style={{
+                                                                        padding: '4px 8px',
+                                                                        borderRadius: '4px',
+                                                                        fontSize: '12px',
+                                                                        background: usage.approvalStatus === 'approved' ? '#4CAF50' : 
+                                                                                   usage.approvalStatus === 'rejected' ? '#ff4444' :
+                                                                                   usage.approvalStatus === 'deletion-pending' ? '#9c27b0' :
+                                                                                   usage.approvalStatus === 'cancelled' ? '#999' : '#ff9800',
+                                                                        color: 'white'
+                                                                    }}>
+                                                                        {usage.approvalStatus === 'approved' ? '승인완료' : 
+                                                                         usage.approvalStatus === 'rejected' ? '반려' :
+                                                                         usage.approvalStatus === 'deletion-pending' ? '취소대기' :
+                                                                         usage.approvalStatus === 'cancelled' ? '취소됨' : '승인대기'}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <button
+                                                                        className="delete-btn"
+                                                                        onClick={() => handleDeleteUsedLeave(usage.id, usage.date, usage.type)}
+                                                                        style={{fontSize: '12px', padding: '4px 8px'}}
+                                                                    >
+                                                                        취소
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ));
+                                                    })()}
                                                 </tbody>
                                             </table>
+                                            {leaveUsage.length > itemsPerPage && (
+                                                <Pagination
+                                                    currentPage={currentPage}
+                                                    totalPages={Math.ceil(leaveUsage.length / itemsPerPage)}
+                                                    onPageChange={setCurrentPage}
+                                                />
+                                            )}
+                                            </>
                                         ) : (
                                             <div style={{padding: '20px', textAlign: 'center', color: '#666'}}>
                                                 연차 사용 내역이 없습니다.
@@ -2193,50 +3086,11 @@
                                     color: '#999',
                                     fontSize: '16px'
                                 }}>
-                                    직원을 선택해주세요
+                                    사원을 선택해주세요
                                 </div>
                             )}
                         </div>
                     </div>
-
-                    {/* 연차 수량 수정 모달 */}
-                    {showEditModal && (
-                        <div className="modal" onClick={() => setShowEditModal(false)}>
-                            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                                <h3>{selectedEmployee.name}님 연차 수량 수정</h3>
-                                <div className="form-group">
-                                    <label>총 연차 수량</label>
-                                    <input
-                                        type="number"
-                                        step="0.5"
-                                        value={editLeaveData.totalLeave}
-                                        onChange={(e) => setEditLeaveData({
-                                            ...editLeaveData,
-                                            totalLeave: e.target.value
-                                        })}
-                                        style={{
-                                            width: '100%',
-                                            padding: '12px',
-                                            border: '1px solid #ddd',
-                                            borderRadius: '6px',
-                                            fontSize: '14px'
-                                        }}
-                                    />
-                                </div>
-                                <div style={{fontSize: '12px', color: '#666', marginTop: '10px'}}>
-                                    * 자동 계산된 연차: {calculateTotalLeave(selectedEmployee.joinDate)}일
-                                </div>
-                                <div className="modal-buttons">
-                                    <button className="btn-secondary" onClick={() => setShowEditModal(false)}>
-                                        취소
-                                    </button>
-                                    <button className="btn-primary" onClick={handleEditLeave}>
-                                        저장
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             );
         }
@@ -2249,6 +3103,7 @@
             const [employees, setEmployees] = useState([]);
             const [isAdmin, setIsAdmin] = useState(false);
             const [isApprover, setIsApprover] = useState(false);
+            const [pendingCount, setPendingCount] = useState(0);
 
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -2323,18 +3178,41 @@
                         >
                             일정 캘린더
                         </button>
-                        <button
-                            className={`tab ${activeTab === 'leave' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('leave')}
-                        >
-                            연차 관리
-                        </button>
-                        {isApprover && (
+                        {!isAdmin && (
+                            <button
+                                className={`tab ${activeTab === 'leave' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('leave')}
+                            >
+                                연차 관리
+                            </button>
+                        )}
+                        {isApprover && !isAdmin && (
                             <button
                                 className={`tab ${activeTab === 'approval' ? 'active' : ''}`}
                                 onClick={() => setActiveTab('approval')}
+                                style={{position: 'relative'}}
                             >
                                 연차 승인
+                                {pendingCount > 0 && (
+                                    <span style={{
+                                        position: 'absolute',
+                                        top: '5px',
+                                        right: '5px',
+                                        background: '#ff4444',
+                                        color: 'white',
+                                        borderRadius: '50%',
+                                        minWidth: '20px',
+                                        height: '20px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '11px',
+                                        fontWeight: 'bold',
+                                        padding: '0 5px'
+                                    }}>
+                                        {pendingCount}
+                                    </span>
+                                )}
                             </button>
                         )}
                         {isAdmin && (
@@ -2343,13 +3221,13 @@
                                     className={`tab ${activeTab === 'admin-leave' ? 'active' : ''}`}
                                     onClick={() => setActiveTab('admin-leave')}
                                 >
-                                    직원연차 관리
+                                    사원연차 관리
                                 </button>
                                 <button
                                     className={`tab ${activeTab === 'admin' ? 'active' : ''}`}
                                     onClick={() => setActiveTab('admin')}
                                 >
-                                    직원 관리
+                                    사원 관리
                                 </button>
                             </>
                         )}
@@ -2357,7 +3235,7 @@
 
                     {activeTab === 'calendar' && <Calendar user={user} employees={employees} />}
                     {activeTab === 'leave' && <AnnualLeave user={user} />}
-                    {activeTab === 'approval' && isApprover && <ApprovalManagement user={user} />}
+                    {activeTab === 'approval' && isApprover && <ApprovalManagement user={user} setPendingCount={setPendingCount} />}
                     {activeTab === 'admin-leave' && isAdmin && <AdminLeaveManagement />}
                     {activeTab === 'admin' && isAdmin && <AdminPage />}
                 </div>
