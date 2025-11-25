@@ -529,23 +529,52 @@
             .header h1 {
                 font-size: 20px;
                 text-align: center;
+                margin-bottom: 10px;
             }
 
-            .header-right {
-                width: 100%;
-                justify-content: center;
+            /* user-info를 flexbox로 재구성 */
+            .user-info {
+                display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
+                width: 100%;
             }
 
-            .badge {
-                font-size: 11px;
-                padding: 3px 8px;
+            /* 이메일을 맨 위에 그대로 두되, 작게 표시 */
+            .user-info > span:first-child {
+                width: 100%;
+                text-align: center;
+                font-size: 12px;
+                color: #666;
+                order: 3;
+                padding: 5px 0;
             }
 
+            /* 배지들을 동일한 크기로 가로 배치 */
+            .user-info > span:not(:first-child) {
+                flex: 1 1 calc(33.333% - 6px);
+                min-width: 0;
+                text-align: center;
+                padding: 10px 8px !important;
+                margin: 0 !important;
+                font-size: 12px !important;
+                min-height: 40px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-sizing: border-box;
+                order: 1;
+            }
+
+            /* 로그아웃 버튼 전체 너비 */
             .logout-btn {
                 width: 100%;
-                margin-top: 10px;
+                flex: 1 1 100%;
+                margin: 0;
+                padding: 10px;
+                font-size: 13px;
+                min-height: 40px;
+                order: 2;
             }
 
             /* 탭 메뉴 */
@@ -619,6 +648,15 @@
                 margin-bottom: 2px;
             }
 
+            /* 캘린더 X 버튼 높이 줄이기 */
+            .calendar .schedule-item button {
+                min-height: 24px;
+                height: 24px;
+                padding: 2px 6px;
+                font-size: 11px;
+                line-height: 1;
+            }
+
             /* 테이블 */
             table {
                 font-size: 13px;
@@ -651,6 +689,8 @@
                 font-size: 16px; /* iOS 줌 방지 */
                 padding: 12px;
                 min-height: 44px;
+                max-width: 100%;
+                box-sizing: border-box;
             }
 
             /* 모달 */
@@ -667,6 +707,19 @@
                 margin-bottom: 15px;
             }
 
+            /* 모달 내 입력 필드 가로 사이즈 조정 */
+            .modal-content input[type="text"],
+            .modal-content input[type="email"],
+            .modal-content input[type="password"],
+            .modal-content input[type="date"],
+            .modal-content input[type="number"],
+            .modal-content select,
+            .modal-content textarea {
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+            }
+
             /* 폼 그룹 */
             .form-group {
                 margin-bottom: 15px;
@@ -677,12 +730,16 @@
                 margin-bottom: 6px;
             }
 
-            /* PT 스케줄 테이블 */
-            .content-card table {
-                display: block;
+            /* PT 스케줄 테이블 - 주차 박스 내에서 스크롤 */
+            .content-card > div > div {
+                padding: 15px;
                 overflow-x: auto;
-                white-space: nowrap;
                 -webkit-overflow-scrolling: touch;
+            }
+
+            .content-card table {
+                width: 100%;
+                min-width: 700px;
             }
 
             .content-card table th,
@@ -816,6 +873,27 @@
             /* PT 스케줄 주차 카드 */
             .content-card > div > div {
                 padding: 15px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background: white;
+                margin-bottom: 20px;
+                max-width: 100%;
+                overflow: hidden;
+            }
+
+            /* PT 스케줄 테이블 래퍼 - 카드 내에서 스크롤 */
+            .content-card > div > div > div:last-child {
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+                margin-left: -15px;
+                margin-right: -15px;
+                padding-left: 15px;
+                padding-right: 15px;
+            }
+
+            /* PT 스케줄 테이블 자체 */
+            .content-card > div > div table {
+                min-width: 700px;
             }
 
             /* 시간 입력 필드 */
