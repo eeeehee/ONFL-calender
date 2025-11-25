@@ -1848,6 +1848,25 @@
                     // 스케줄 정보 가져오기
                     const scheduleDoc = await db.collection('schedules').doc(scheduleId).get();
                     const scheduleData = scheduleDoc.data();
+                    const groupId = scheduleData.groupId;
+                    
+                    // groupId가 있으면 연결된 모든 일정 정보 가져오기
+                    let groupInfo = null;
+                    if (groupId) {
+                        const leaveUsageSnapshot = await db.collection('leaveUsage')
+                            .where('userId', '==', user.uid)
+                            .where('groupId', '==', groupId)
+                            .get();
+                        
+                        if (!leaveUsageSnapshot.empty) {
+                            const firstDoc = leaveUsageSnapshot.docs[0].data();
+                            groupInfo = {
+                                startDate: firstDoc.startDate,
+                                endDate: firstDoc.endDate,
+                                totalDays: firstDoc.totalDays
+                            };
+                        }
+                    }
                     
                     // 연차 관련 일정인지 확인
                     const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(scheduleType);
@@ -1858,8 +1877,163 @@
                         if (scheduleData.approvalStatus === 'approved') {
                             if (isApprover) {
                                 // 승인자는 즉시 취소
-                                if (!confirm('이 연차를 취소하시겠습니까?')) return;
+                                const confirmMsg = groupInfo 
+                                    ? `${groupInfo.startDate} ~ ${groupInfo.endDate} (${groupInfo.totalDays}일) 연차를 모두 취소하시겠습니까?`
+                                    : '이 연차를 취소하시겠습니까?';
+                                if (!confirm(confirmMsg)) return;
                                 
+                                // groupId가 있으면 그룹 전체 취소, 없으면 단일 일정만 취소
+                                if (groupId) {
+                                    // 같은 그룹의 모든 스케줄 취소
+                                    const groupSchedulesSnapshot = await db.collection('schedules')
+                                        .where('userId', '==', user.uid)
+                                        .where('groupId', '==', groupId)
+                                        .get();
+
+                                    groupSchedulesSnapshot.forEach(async (doc) => {
+                                        await doc.ref.update({
+                                            approvalStatus: 'cancelled',
+                                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                        });
+                                    });
+
+                                    // 같은 그룹의 모든 leaveUsage 취소
+                                    const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                        .where('userId', '==', user.uid)
+                                        .where('groupId', '==', groupId)
+                                        .get();
+
+                                    leaveUsageSnapshot.forEach(async (doc) => {
+                                        await doc.ref.update({
+                                            approvalStatus: 'cancelled',
+                                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                        });
+                                    });
+                                } else {
+                                    // 단일 일정만 취소
+                                    await db.collection('schedules').doc(scheduleId).update({
+                                        approvalStatus: 'cancelled',
+                                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+
+                                    const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                        .where('userId', '==', user.uid)
+                                        .where('date', '==', scheduleDate)
+                                        .where('type', '==', scheduleType)
+                                        .get();
+
+                                    leaveUsageSnapshot.forEach(async (doc) => {
+                                        await doc.ref.update({
+                                            approvalStatus: 'cancelled',
+                                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                        });
+                                    });
+                                }
+                                
+                                alert('연차가 취소되었습니다.');
+                            } else {
+                                // 일반 사원은 취소 승인 요청
+                                const confirmMsg = groupInfo 
+                                    ? `승인 완료된 연차입니다. ${groupInfo.startDate} ~ ${groupInfo.endDate} (${groupInfo.totalDays}일) 연차의 취소 승인을 요청하시겠습니까?`
+                                    : '승인 완료된 연차입니다. 취소 승인을 요청하시겠습니까?';
+                                if (!confirm(confirmMsg)) return;
+                                
+                                if (groupId) {
+                                    // 같은 그룹의 모든 스케줄 취소 대기
+                                    const groupSchedulesSnapshot = await db.collection('schedules')
+                                        .where('userId', '==', user.uid)
+                                        .where('groupId', '==', groupId)
+                                        .get();
+
+                                    groupSchedulesSnapshot.forEach(async (doc) => {
+                                        await doc.ref.update({
+                                            approvalStatus: 'deletion-pending',
+                                            deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                        });
+                                    });
+
+                                    // 같은 그룹의 모든 leaveUsage 취소 대기
+                                    const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                        .where('userId', '==', user.uid)
+                                        .where('groupId', '==', groupId)
+                                        .get();
+
+                                    leaveUsageSnapshot.forEach(async (doc) => {
+                                        await doc.ref.update({
+                                            approvalStatus: 'deletion-pending',
+                                            deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                        });
+                                    });
+                                    
+                                    // 승인자에게 Slack 알림
+                                    if (employeeInfo?.approver) {
+                                        const slackMessage = `${employeeInfo.name}님이 연차 취소 승인 요청을 보냈습니다.\n날짜: ${groupInfo.startDate} ~ ${groupInfo.endDate} (${groupInfo.totalDays}일)\n유형: ${scheduleType}`;
+                                        await sendSlackNotification(employeeInfo.approver, slackMessage, 'cancellation');
+                                    }
+                                } else {
+                                    // 단일 일정만 취소 대기
+                                    await db.collection('schedules').doc(scheduleId).update({
+                                        approvalStatus: 'deletion-pending',
+                                        deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+
+                                    const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                        .where('userId', '==', user.uid)
+                                        .where('date', '==', scheduleDate)
+                                        .where('type', '==', scheduleType)
+                                        .get();
+
+                                    leaveUsageSnapshot.forEach(async (doc) => {
+                                        await doc.ref.update({
+                                            approvalStatus: 'deletion-pending',
+                                            deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                        });
+                                    });
+                                    
+                                    // 승인자에게 Slack 알림
+                                    if (employeeInfo?.approver) {
+                                        const slackMessage = `${employeeInfo.name}님이 연차 취소 승인 요청을 보냈습니다.\n날짜: ${scheduleDate}\n유형: ${scheduleType}`;
+                                        await sendSlackNotification(employeeInfo.approver, slackMessage, 'cancellation');
+                                    }
+                                }
+                                
+                                alert('취소 승인 요청이 완료되었습니다.');
+                            }
+                        } else {
+                            // 승인대기 또는 기타 상태는 즉시 취소
+                            const confirmMsg = groupInfo 
+                                ? `${groupInfo.startDate} ~ ${groupInfo.endDate} (${groupInfo.totalDays}일) 일정을 모두 취소하시겠습니까?`
+                                : '이 일정을 취소하시겠습니까?';
+                            if (!confirm(confirmMsg)) return;
+                            
+                            if (groupId) {
+                                // 같은 그룹의 모든 스케줄 취소
+                                const groupSchedulesSnapshot = await db.collection('schedules')
+                                    .where('userId', '==', user.uid)
+                                    .where('groupId', '==', groupId)
+                                    .get();
+
+                                groupSchedulesSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'cancelled',
+                                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+
+                                // 같은 그룹의 모든 leaveUsage 취소
+                                const leaveUsageSnapshot = await db.collection('leaveUsage')
+                                    .where('userId', '==', user.uid)
+                                    .where('groupId', '==', groupId)
+                                    .get();
+
+                                leaveUsageSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'cancelled',
+                                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+                            } else {
+                                // 단일 일정만 취소
                                 await db.collection('schedules').doc(scheduleId).update({
                                     approvalStatus: 'cancelled',
                                     cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1877,53 +2051,7 @@
                                         cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
                                     });
                                 });
-                                
-                                alert('연차가 취소되었습니다.');
-                            } else {
-                                // 일반 사원은 취소 승인 요청
-                                if (!confirm('승인 완료된 연차입니다. 취소 승인을 요청하시겠습니까?')) return;
-                                
-                                await db.collection('schedules').doc(scheduleId).update({
-                                    approvalStatus: 'deletion-pending',
-                                    deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
-                                });
-
-                                const leaveUsageSnapshot = await db.collection('leaveUsage')
-                                    .where('userId', '==', user.uid)
-                                    .where('date', '==', scheduleDate)
-                                    .where('type', '==', scheduleType)
-                                    .get();
-
-                                leaveUsageSnapshot.forEach(async (doc) => {
-                                    await doc.ref.update({
-                                        approvalStatus: 'deletion-pending',
-                                        deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
-                                    });
-                                });
-                                
-                                alert('취소 승인 요청이 완료되었습니다.');
                             }
-                        } else {
-                            // 승인대기 또는 기타 상태는 즉시 취소
-                            if (!confirm('이 일정을 취소하시겠습니까?')) return;
-                            
-                            await db.collection('schedules').doc(scheduleId).update({
-                                approvalStatus: 'cancelled',
-                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-
-                            const leaveUsageSnapshot = await db.collection('leaveUsage')
-                                .where('userId', '==', user.uid)
-                                .where('date', '==', scheduleDate)
-                                .where('type', '==', scheduleType)
-                                .get();
-
-                            leaveUsageSnapshot.forEach(async (doc) => {
-                                await doc.ref.update({
-                                    approvalStatus: 'cancelled',
-                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
-                                });
-                            });
                             
                             alert('일정이 취소되었습니다.');
                         }
@@ -2224,13 +2352,48 @@
                         .where('userId', '==', user.uid)
                         .get();
 
-                    const usage = [];
+                    const allUsage = [];
                     snapshot.forEach(doc => {
-                        usage.push({ id: doc.id, ...doc.data() });
+                        allUsage.push({ id: doc.id, ...doc.data() });
                     });
                     
+                    // groupId로 그룹핑
+                    const groupedUsage = {};
+                    const ungroupedUsage = [];
+                    
+                    allUsage.forEach(item => {
+                        if (item.groupId) {
+                            if (!groupedUsage[item.groupId]) {
+                                groupedUsage[item.groupId] = {
+                                    id: item.groupId,
+                                    ids: [item.id],
+                                    userId: item.userId,
+                                    startDate: item.startDate || item.date,
+                                    endDate: item.endDate || item.date,
+                                    date: item.startDate || item.date,
+                                    type: item.type,
+                                    amount: item.amount,
+                                    totalDays: item.totalDays || 1,
+                                    note: item.note,
+                                    approvalStatus: item.approvalStatus,
+                                    createdAt: item.createdAt,
+                                    groupId: item.groupId,
+                                    isGrouped: true
+                                };
+                            } else {
+                                groupedUsage[item.groupId].ids.push(item.id);
+                            }
+                        } else {
+                            // groupId가 없는 경우 (이전 데이터)
+                            ungroupedUsage.push(item);
+                        }
+                    });
+                    
+                    // 그룹화된 데이터와 그룹화되지 않은 데이터 합치기
+                    const usage = [...Object.values(groupedUsage), ...ungroupedUsage];
+                    
                     // 날짜 기준으로 내림차순 정렬
-                    usage.sort((a, b) => b.date.localeCompare(a.date));
+                    usage.sort((a, b) => (b.startDate || b.date).localeCompare(a.startDate || a.date));
                     
                     setLeaveUsage(usage);
                 } catch (error) {
@@ -2261,22 +2424,141 @@
                     .reduce((sum, usage) => sum + usage.amount, 0);
             };
 
-            const handleDeleteLeave = async (usageId, usageDate, usageType, approvalStatus) => {
+            const handleDeleteLeave = async (usageIdOrGroup, usageDate, usageType, approvalStatus, groupId) => {
                 try {
                     const isApprover = employeeInfo?.isApprover;
+                    
+                    // groupId가 있으면 그룹 전체 삭제, 없으면 단일 항목 삭제
+                    const usageIds = groupId ? usageIdOrGroup.ids : [usageIdOrGroup];
+                    const isGrouped = !!groupId;
 
                     if (approvalStatus === 'approved') {
                         // 승인완료된 연차 취소
                         if (isApprover) {
                             // 승인자는 즉시 취소 처리
-                            if (!confirm('이 연차를 취소하시겠습니까?')) return;
+                            const confirmMsg = isGrouped 
+                                ? `${usageIdOrGroup.startDate} ~ ${usageIdOrGroup.endDate} (${usageIdOrGroup.totalDays}일) 연차를 모두 취소하시겠습니까?`
+                                : '이 연차를 취소하시겠습니까?';
+                            if (!confirm(confirmMsg)) return;
                             
-                            await db.collection('leaveUsage').doc(usageId).update({
+                            // 모든 연차 기록 취소
+                            for (const id of usageIds) {
+                                await db.collection('leaveUsage').doc(id).update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            }
+
+                            // 스케줄도 취소 상태로 변경
+                            if (groupId) {
+                                const scheduleSnapshot = await db.collection('schedules')
+                                    .where('userId', '==', user.uid)
+                                    .where('groupId', '==', groupId)
+                                    .get();
+
+                                scheduleSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'cancelled',
+                                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+                            } else {
+                                const scheduleSnapshot = await db.collection('schedules')
+                                    .where('userId', '==', user.uid)
+                                    .where('date', '==', usageDate)
+                                    .where('type', '==', usageType)
+                                    .get();
+
+                                scheduleSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'cancelled',
+                                        cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+                            }
+                            
+                            alert('연차가 취소되었습니다.');
+                        } else {
+                            // 일반 사원은 취소 승인 요청
+                            const confirmMsg = isGrouped 
+                                ? `승인 완료된 연차입니다. ${usageIdOrGroup.startDate} ~ ${usageIdOrGroup.endDate} (${usageIdOrGroup.totalDays}일) 연차의 취소 승인을 요청하시겠습니까?`
+                                : '승인 완료된 연차입니다. 취소 승인을 요청하시겠습니까?';
+                            if (!confirm(confirmMsg)) return;
+                            
+                            for (const id of usageIds) {
+                                await db.collection('leaveUsage').doc(id).update({
+                                    approvalStatus: 'deletion-pending',
+                                    deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            }
+
+                            // 스케줄도 취소 대기로 변경
+                            if (groupId) {
+                                const scheduleSnapshot = await db.collection('schedules')
+                                    .where('userId', '==', user.uid)
+                                    .where('groupId', '==', groupId)
+                                    .get();
+
+                                scheduleSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'deletion-pending',
+                                        deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+                            } else {
+                                const scheduleSnapshot = await db.collection('schedules')
+                                    .where('userId', '==', user.uid)
+                                    .where('date', '==', usageDate)
+                                    .where('type', '==', usageType)
+                                    .get();
+
+                                scheduleSnapshot.forEach(async (doc) => {
+                                    await doc.ref.update({
+                                        approvalStatus: 'deletion-pending',
+                                        deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    });
+                                });
+                            }
+                            
+                            // 승인자에게 Slack 알림
+                            if (employeeInfo?.approver) {
+                                const dateStr = isGrouped 
+                                    ? `${usageIdOrGroup.startDate} ~ ${usageIdOrGroup.endDate} (${usageIdOrGroup.totalDays}일)`
+                                    : usageDate;
+                                const slackMessage = `${employeeInfo.name}님이 연차 취소 승인 요청을 보냈습니다.\n날짜: ${dateStr}\n유형: ${usageType}`;
+                                await sendSlackNotification(employeeInfo.approver, slackMessage, 'cancellation');
+                            }
+                            
+                            alert('취소 승인 요청이 완료되었습니다.');
+                        }
+                    } else if (approvalStatus === 'pending') {
+                        // 승인대기 연차는 즉시 취소
+                        const confirmMsg = isGrouped 
+                            ? `${usageIdOrGroup.startDate} ~ ${usageIdOrGroup.endDate} (${usageIdOrGroup.totalDays}일) 연차 신청을 모두 취소하시겠습니까?`
+                            : '이 연차 신청을 취소하시겠습니까?';
+                        if (!confirm(confirmMsg)) return;
+                        
+                        for (const id of usageIds) {
+                            await db.collection('leaveUsage').doc(id).update({
                                 approvalStatus: 'cancelled',
                                 cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
+                        }
 
-                            // 스케줄도 취소 상태로 변경
+                        // 스케줄도 취소 상태로 변경
+                        if (groupId) {
+                            const scheduleSnapshot = await db.collection('schedules')
+                                .where('userId', '==', user.uid)
+                                .where('groupId', '==', groupId)
+                                .get();
+
+                            scheduleSnapshot.forEach(async (doc) => {
+                                await doc.ref.update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            });
+                        } else {
                             const scheduleSnapshot = await db.collection('schedules')
                                 .where('userId', '==', user.uid)
                                 .where('date', '==', usageDate)
@@ -2289,18 +2571,36 @@
                                     cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
                                 });
                             });
-                            
-                            alert('연차가 취소되었습니다.');
-                        } else {
-                            // 일반 사원은 취소 승인 요청
-                            if (!confirm('승인 완료된 연차입니다. 취소 승인을 요청하시겠습니까?')) return;
-                            
-                            await db.collection('leaveUsage').doc(usageId).update({
-                                approvalStatus: 'deletion-pending',
-                                deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        }
+                        
+                        alert('연차 신청이 취소되었습니다.');
+                    } else {
+                        // 반려되거나 취소대기 상태는 즉시 취소
+                        const confirmMsg = isGrouped 
+                            ? `${usageIdOrGroup.startDate} ~ ${usageIdOrGroup.endDate} (${usageIdOrGroup.totalDays}일) 연차 내역을 취소하시겠습니까?`
+                            : '이 연차 내역을 취소하시겠습니까?';
+                        if (!confirm(confirmMsg)) return;
+                        
+                        for (const id of usageIds) {
+                            await db.collection('leaveUsage').doc(id).update({
+                                approvalStatus: 'cancelled',
+                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
+                        }
 
-                            // 스케줄도 취소 대기로 변경
+                        if (groupId) {
+                            const scheduleSnapshot = await db.collection('schedules')
+                                .where('userId', '==', user.uid)
+                                .where('groupId', '==', groupId)
+                                .get();
+
+                            scheduleSnapshot.forEach(async (doc) => {
+                                await doc.ref.update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            });
+                        } else {
                             const scheduleSnapshot = await db.collection('schedules')
                                 .where('userId', '==', user.uid)
                                 .where('date', '==', usageDate)
@@ -2309,64 +2609,11 @@
 
                             scheduleSnapshot.forEach(async (doc) => {
                                 await doc.ref.update({
-                                    approvalStatus: 'deletion-pending',
-                                    deletionRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
                                 });
                             });
-                            
-                            // 승인자에게 Slack 알림
-                            if (employeeInfo?.approver) {
-                                const slackMessage = `${employeeInfo.name}님이 연차 취소 승인 요청을 보냈습니다.\n날짜: ${usageDate}\n유형: ${usageType}`;
-                                await sendSlackNotification(employeeInfo.approver, slackMessage, 'cancellation');
-                            }
-                            
-                            alert('취소 승인 요청이 완료되었습니다.');
                         }
-                    } else if (approvalStatus === 'pending') {
-                        // 승인대기 연차는 즉시 취소
-                        if (!confirm('이 연차 신청을 취소하시겠습니까?')) return;
-                        
-                        await db.collection('leaveUsage').doc(usageId).update({
-                            approvalStatus: 'cancelled',
-                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-
-                        // 스케줄도 취소 상태로 변경
-                        const scheduleSnapshot = await db.collection('schedules')
-                            .where('userId', '==', user.uid)
-                            .where('date', '==', usageDate)
-                            .where('type', '==', usageType)
-                            .get();
-
-                        scheduleSnapshot.forEach(async (doc) => {
-                            await doc.ref.update({
-                                approvalStatus: 'cancelled',
-                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-                        });
-                        
-                        alert('연차 신청이 취소되었습니다.');
-                    } else {
-                        // 반려되거나 취소대기 상태는 즉시 취소
-                        if (!confirm('이 연차 내역을 취소하시겠습니까?')) return;
-                        
-                        await db.collection('leaveUsage').doc(usageId).update({
-                            approvalStatus: 'cancelled',
-                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-
-                        const scheduleSnapshot = await db.collection('schedules')
-                            .where('userId', '==', user.uid)
-                            .where('date', '==', usageDate)
-                            .where('type', '==', usageType)
-                            .get();
-
-                        scheduleSnapshot.forEach(async (doc) => {
-                            await doc.ref.update({
-                                approvalStatus: 'cancelled',
-                                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
-                            });
-                        });
                         
                         alert('취소되었습니다.');
                     }
@@ -2405,6 +2652,20 @@
                     leaveAmount = 0; // 연차 수량에 카운트하지 않음
                 }
                 
+                // 연속된 연차를 묶기 위한 groupId 생성
+                const groupId = `${user.uid}_${Date.now()}`;
+                
+                // 실제 근무일 수 계산 (주말 제외)
+                let workDayCount = 0;
+                const tempDate = new Date(startDate);
+                while (tempDate <= endDate) {
+                    const dayOfWeek = tempDate.getDay();
+                    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                        workDayCount++;
+                    }
+                    tempDate.setDate(tempDate.getDate() + 1);
+                }
+                
                 // 시작일부터 종료일까지 순회
                 const currentDate = new Date(startDate);
                 while (currentDate <= endDate) {
@@ -2417,8 +2678,12 @@
                         await db.collection('leaveUsage').add({
                             userId: user.uid,
                             date: dateStr,
+                            startDate: leaveStartDate,
+                            endDate: leaveEndDate,
                             type: leaveType,
                             amount: leaveAmount,
+                            totalDays: workDayCount,
+                            groupId: groupId,
                             approvalStatus: approvalStatus,
                             createdAt: firebase.firestore.FieldValue.serverTimestamp()
                         });
@@ -2434,6 +2699,7 @@
                             const docId = existingSchedule.docs[0].id;
                             await scheduleRef.doc(docId).update({
                                 type: leaveType,
+                                groupId: groupId,
                                 approvalStatus: approvalStatus,
                                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
@@ -2443,6 +2709,7 @@
                                 userName: user.displayName || user.email,
                                 date: dateStr,
                                 type: leaveType,
+                                groupId: groupId,
                                 approvalStatus: approvalStatus,
                                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
@@ -2523,9 +2790,17 @@
                                     const currentItems = leaveUsage.slice(startIndex, endIndex);
                                     return currentItems.map(usage => (
                                         <tr key={usage.id}>
-                                            <td>{usage.date}</td>
+                                            <td>
+                                                {usage.isGrouped && usage.startDate !== usage.endDate 
+                                                    ? `${usage.startDate} ~ ${usage.endDate}`
+                                                    : (usage.startDate || usage.date)}
+                                            </td>
                                             <td>{usage.type}</td>
-                                            <td>{usage.amount > 0 ? `${usage.amount}일` : '-'}</td>
+                                            <td>
+                                                {usage.isGrouped && usage.totalDays > 1
+                                                    ? `${usage.totalDays}일`
+                                                    : (usage.amount > 0 ? `${usage.amount}일` : '-')}
+                                            </td>
                                             <td>
                                                 <span style={{
                                                     padding: '4px 8px',
@@ -2546,7 +2821,13 @@
                                             <td>
                                                 {(usage.approvalStatus !== 'deletion-pending' && usage.approvalStatus !== 'cancelled') && (
                                                     <button
-                                                        onClick={() => handleDeleteLeave(usage.id, usage.date, usage.type, usage.approvalStatus)}
+                                                        onClick={() => handleDeleteLeave(
+                                                            usage.isGrouped ? usage : usage.id,
+                                                            usage.date,
+                                                            usage.type,
+                                                            usage.approvalStatus,
+                                                            usage.groupId
+                                                        )}
                                                         style={{
                                                             padding: '4px 8px',
                                                             background: '#ff4444',
@@ -3901,12 +4182,44 @@
                         .where('userId', '==', employeeId)
                         .get();
 
-                    const usage = [];
+                    const allUsage = [];
                     snapshot.forEach(doc => {
-                        usage.push({ id: doc.id, ...doc.data() });
+                        allUsage.push({ id: doc.id, ...doc.data() });
                     });
                     
-                    usage.sort((a, b) => b.date.localeCompare(a.date));
+                    // groupId로 그룹핑
+                    const groupedUsage = {};
+                    const ungroupedUsage = [];
+                    
+                    allUsage.forEach(item => {
+                        if (item.groupId) {
+                            if (!groupedUsage[item.groupId]) {
+                                groupedUsage[item.groupId] = {
+                                    id: item.groupId,
+                                    ids: [item.id],
+                                    userId: item.userId,
+                                    startDate: item.startDate || item.date,
+                                    endDate: item.endDate || item.date,
+                                    date: item.startDate || item.date,
+                                    type: item.type,
+                                    amount: item.amount,
+                                    totalDays: item.totalDays || 1,
+                                    note: item.note,
+                                    approvalStatus: item.approvalStatus,
+                                    createdAt: item.createdAt,
+                                    groupId: item.groupId,
+                                    isGrouped: true
+                                };
+                            } else {
+                                groupedUsage[item.groupId].ids.push(item.id);
+                            }
+                        } else {
+                            ungroupedUsage.push(item);
+                        }
+                    });
+                    
+                    const usage = [...Object.values(groupedUsage), ...ungroupedUsage];
+                    usage.sort((a, b) => (b.startDate || b.date).localeCompare(a.startDate || a.date));
                     setLeaveUsage(usage);
                 } catch (error) {
                     console.error('연차 내역 로드 실패:', error);
@@ -3943,16 +4256,27 @@
                     .reduce((sum, usage) => sum + usage.amount, 0);
             };
 
-            const handleDeleteUsedLeave = async (usageId, usageDate, usageType) => {
+            const handleDeleteUsedLeave = async (usageIdOrGroup, usageDate, usageType, groupId) => {
                 // 수정 건인지 확인 (총연차 수정, 사용연차 수정)
                 const isEditRecord = usageType === '총연차 수정' || usageType === '사용연차 수정';
+                const isGrouped = !!groupId;
+                const usageIds = isGrouped ? usageIdOrGroup.ids : [usageIdOrGroup];
                 
-                if (!confirm(isEditRecord ? '이 수정 내역을 삭제하시겠습니까?' : '이 연차 내역을 취소하시겠습니까?')) return;
+                let confirmMsg;
+                if (isEditRecord) {
+                    confirmMsg = '이 수정 내역을 삭제하시겠습니까?';
+                } else if (isGrouped) {
+                    confirmMsg = `${usageIdOrGroup.startDate} ~ ${usageIdOrGroup.endDate} (${usageIdOrGroup.totalDays}일) 연차 내역을 모두 취소하시겠습니까?`;
+                } else {
+                    confirmMsg = '이 연차 내역을 취소하시겠습니까?';
+                }
+                
+                if (!confirm(confirmMsg)) return;
 
                 try {
                     if (isEditRecord) {
                         // 수정 건은 바로 삭제
-                        await db.collection('leaveUsage').doc(usageId).delete();
+                        await db.collection('leaveUsage').doc(usageIdOrGroup).delete();
                         
                         // customUsedLeave 또는 customTotalLeave 초기화
                         if (usageType === '사용연차 수정') {
@@ -3978,24 +4302,40 @@
                         loadEmployees();
                     } else {
                         // 일반 연차는 취소 상태로 변경
-                        await db.collection('leaveUsage').doc(usageId).update({
-                            approvalStatus: 'cancelled',
-                            cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-
-                        // 해당 날짜의 스케줄도 취소 상태로 변경
-                        const scheduleSnapshot = await db.collection('schedules')
-                            .where('userId', '==', selectedEmployee.id)
-                            .where('date', '==', usageDate)
-                            .where('type', '==', usageType)
-                            .get();
-
-                        scheduleSnapshot.forEach(async (doc) => {
-                            await doc.ref.update({
+                        for (const id of usageIds) {
+                            await db.collection('leaveUsage').doc(id).update({
                                 approvalStatus: 'cancelled',
                                 cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
                             });
-                        });
+                        }
+
+                        // 해당 날짜의 스케줄도 취소 상태로 변경
+                        if (groupId) {
+                            const scheduleSnapshot = await db.collection('schedules')
+                                .where('userId', '==', selectedEmployee.id)
+                                .where('groupId', '==', groupId)
+                                .get();
+
+                            scheduleSnapshot.forEach(async (doc) => {
+                                await doc.ref.update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            });
+                        } else {
+                            const scheduleSnapshot = await db.collection('schedules')
+                                .where('userId', '==', selectedEmployee.id)
+                                .where('date', '==', usageDate)
+                                .where('type', '==', usageType)
+                                .get();
+
+                            scheduleSnapshot.forEach(async (doc) => {
+                                await doc.ref.update({
+                                    approvalStatus: 'cancelled',
+                                    cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+                                });
+                            });
+                        }
 
                         alert('취소되었습니다.');
                     }
@@ -4369,9 +4709,17 @@
                                                             const isEditRecord = usage.type === '총연차 수정' || usage.type === '사용연차 수정';
                                                             return (
                                                             <tr key={usage.id}>
-                                                                <td>{usage.date}</td>
+                                                                <td>
+                                                                    {usage.isGrouped && usage.startDate !== usage.endDate 
+                                                                        ? `${usage.startDate} ~ ${usage.endDate}`
+                                                                        : (usage.startDate || usage.date)}
+                                                                </td>
                                                                 <td>{usage.type}</td>
-                                                                <td>{usage.amount > 0 ? `${usage.amount}일` : '-'}</td>
+                                                                <td>
+                                                                    {usage.isGrouped && usage.totalDays > 1
+                                                                        ? `${usage.totalDays}일`
+                                                                        : (usage.amount > 0 ? `${usage.amount}일` : '-')}
+                                                                </td>
                                                                 <td>{usage.note || '-'}</td>
                                                                 <td>
                                                                     {usage.approvalStatus === '-' || isEditRecord ? (
@@ -4403,7 +4751,12 @@
                                                                 <td>
                                                                     <button
                                                                         className="delete-btn"
-                                                                        onClick={() => handleDeleteUsedLeave(usage.id, usage.date, usage.type)}
+                                                                        onClick={() => handleDeleteUsedLeave(
+                                                                            usage.isGrouped ? usage : usage.id,
+                                                                            usage.date,
+                                                                            usage.type,
+                                                                            usage.groupId
+                                                                        )}
                                                                         style={{fontSize: '12px', padding: '4px 8px'}}
                                                                     >
                                                                         {isEditRecord ? '삭제' : '취소'}
