@@ -4863,12 +4863,24 @@
                 }
 
                 try {
-                    await db.collection('approvalLines').add({
+                    // 결재선 추가
+                    const docRef = await db.collection('approvalLines').add({
                         name: newLine.name,
                         approverId: newLine.approverId,
                         memberIds: newLine.memberIds,
                         createdAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
+
+                    // 포함된 사원들에게 결재선 자동 할당
+                    const batch = db.batch();
+                    newLine.memberIds.forEach(memberId => {
+                        const memberRef = db.collection('employees').doc(memberId);
+                        batch.update(memberRef, {
+                            approvalLine: docRef.id,
+                            approver: newLine.approverId
+                        });
+                    });
+                    await batch.commit();
 
                     alert('결재선이 등록되었습니다.');
                     setShowAddModal(false);
@@ -4883,7 +4895,26 @@
                 if (!confirm('이 결재선을 삭제하시겠습니까?')) return;
 
                 try {
+                    // 삭제할 결재선 정보 가져오기
+                    const line = approvalLines.find(l => l.id === lineId);
+                    const memberIds = line?.memberIds || [];
+
+                    // 결재선 삭제
                     await db.collection('approvalLines').doc(lineId).delete();
+                    
+                    // 포함된 사원들의 결재선 제거
+                    if (memberIds.length > 0) {
+                        const batch = db.batch();
+                        memberIds.forEach(memberId => {
+                            const memberRef = db.collection('employees').doc(memberId);
+                            batch.update(memberRef, {
+                                approvalLine: null,
+                                approver: null
+                            });
+                        });
+                        await batch.commit();
+                    }
+
                     alert('결재선이 삭제되었습니다.');
                     loadApprovalLines();
                 } catch (error) {
@@ -4908,12 +4939,57 @@
                 }
 
                 try {
+                    // 기존 결재선 정보 가져오기
+                    const oldLine = approvalLines.find(line => line.id === editingLineId);
+                    const oldMemberIds = oldLine?.memberIds || [];
+                    const newMemberIds = newLine.memberIds;
+
+                    // 결재선 업데이트
                     await db.collection('approvalLines').doc(editingLineId).update({
                         name: newLine.name,
                         approverId: newLine.approverId,
                         memberIds: newLine.memberIds,
                         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                     });
+
+                    // 추가된 사원: 새로운 memberIds에는 있지만 기존에는 없던 사원
+                    const addedMemberIds = newMemberIds.filter(id => !oldMemberIds.includes(id));
+                    
+                    // 제외된 사원: 기존에는 있었지만 새로운 memberIds에는 없는 사원
+                    const removedMemberIds = oldMemberIds.filter(id => !newMemberIds.includes(id));
+
+                    const batch = db.batch();
+                    
+                    // 추가된 사원들에게 결재선 할당
+                    addedMemberIds.forEach(memberId => {
+                        const memberRef = db.collection('employees').doc(memberId);
+                        batch.update(memberRef, {
+                            approvalLine: editingLineId,
+                            approver: newLine.approverId
+                        });
+                    });
+                    
+                    // 제외된 사원들의 결재선 제거
+                    removedMemberIds.forEach(memberId => {
+                        const memberRef = db.collection('employees').doc(memberId);
+                        batch.update(memberRef, {
+                            approvalLine: null,
+                            approver: null
+                        });
+                    });
+                    
+                    // 기존에 포함되어 있던 사원들 중 승인자가 변경된 경우 업데이트
+                    const unchangedMemberIds = newMemberIds.filter(id => oldMemberIds.includes(id));
+                    if (oldLine.approverId !== newLine.approverId) {
+                        unchangedMemberIds.forEach(memberId => {
+                            const memberRef = db.collection('employees').doc(memberId);
+                            batch.update(memberRef, {
+                                approver: newLine.approverId
+                            });
+                        });
+                    }
+                    
+                    await batch.commit();
 
                     alert('결재선이 수정되었습니다.');
                     setShowAddModal(false);
@@ -4939,7 +5015,40 @@
             };
 
             const approvers = employees.filter(emp => emp.isApprover).sort((a, b) => a.name.localeCompare(b.name));
-            const nonApprovers = employees.filter(emp => !emp.isApprover).sort((a, b) => a.name.localeCompare(b.name));
+            
+            // 다른 결재선에 포함된 사원 제외
+            const getAvailableNonApprovers = () => {
+                const allNonApprovers = employees.filter(emp => !emp.isApprover);
+                
+                // 수정 모드인 경우
+                if (editingLineId) {
+                    // 다른 결재선에 포함된 사원 ID 목록
+                    const usedMemberIds = new Set();
+                    approvalLines.forEach(line => {
+                        // 현재 수정 중인 결재선이 아닌 경우만
+                        if (line.id !== editingLineId && line.memberIds) {
+                            line.memberIds.forEach(id => usedMemberIds.add(id));
+                        }
+                    });
+                    
+                    // 다른 결재선에 없는 사원만 반환
+                    return allNonApprovers.filter(emp => !usedMemberIds.has(emp.id))
+                        .sort((a, b) => a.name.localeCompare(b.name));
+                } else {
+                    // 신규 등록인 경우
+                    const usedMemberIds = new Set();
+                    approvalLines.forEach(line => {
+                        if (line.memberIds) {
+                            line.memberIds.forEach(id => usedMemberIds.add(id));
+                        }
+                    });
+                    
+                    return allNonApprovers.filter(emp => !usedMemberIds.has(emp.id))
+                        .sort((a, b) => a.name.localeCompare(b.name));
+                }
+            };
+            
+            const nonApprovers = getAvailableNonApprovers();
 
             const getEmployeeName = (employeeId) => {
                 const employee = employees.find(emp => emp.id === employeeId);
