@@ -869,7 +869,17 @@
                 const week = weekSchedules.find(w => w.weekNumber === weekNumber);
                 if (week) {
                     setEditingWeek(weekNumber);
-                    setTempSlots({ ...week.slots });
+                    // 슬롯 데이터를 객체 형태로 변환 (기존 이름만 있으면 { name: 이름, cancelled: false })
+                    const slotsWithStatus = {};
+                    Object.keys(week.slots).forEach(key => {
+                        const value = week.slots[key];
+                        if (typeof value === 'string') {
+                            slotsWithStatus[key] = { name: value, cancelled: false };
+                        } else {
+                            slotsWithStatus[key] = value;
+                        }
+                    });
+                    setTempSlots(slotsWithStatus);
                     setTempTimeSlots([...week.timeSlots]);
                 }
             };
@@ -887,10 +897,21 @@
                     const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
                     const weekKey = `week${weekNumber}`;
 
+                    // 저장 시에는 객체 형태 그대로 유지 (취소 정보 포함)
+                    const slotsToSave = {};
+                    Object.keys(tempSlots).forEach(key => {
+                        const slot = tempSlots[key];
+                        // 객체 형태로 저장하여 취소 정보 유지
+                        slotsToSave[key] = {
+                            name: slot.name || '',
+                            cancelled: slot.cancelled || false
+                        };
+                    });
+
                     await db.collection('ptSchedules').doc(yearMonth).set({
                         [weekKey]: {
                             timeSlots: tempTimeSlots,
-                            slots: tempSlots
+                            slots: slotsToSave
                         }
                     }, { merge: true });
 
@@ -908,7 +929,25 @@
             const handleSlotChange = (slotKey, value) => {
                 setTempSlots(prev => ({
                     ...prev,
-                    [slotKey]: value
+                    [slotKey]: { name: value, cancelled: false }
+                }));
+            };
+
+            const handleCancelSlot = (slotKey) => {
+                setTempSlots(prev => {
+                    const current = prev[slotKey] || { name: '', cancelled: false };
+                    return {
+                        ...prev,
+                        [slotKey]: { ...current, cancelled: true }
+                    };
+                });
+            };
+
+            const handleReactivateSlot = (slotKey, value) => {
+                // 취소선 상태에서 새 인원 선택 시 취소 해제하고 새 인원으로 교체
+                setTempSlots(prev => ({
+                    ...prev,
+                    [slotKey]: { name: value, cancelled: false }
                 }));
             };
 
@@ -1223,7 +1262,9 @@
                                                             </td>
                                                             {weekDays.map((day, idx) => {
                                                                 const slotKey = `${day}-${time}`;
-                                                                const slotValue = displaySlots?.[slotKey] || '';
+                                                                const slotData = displaySlots?.[slotKey];
+                                                                const slotValue = typeof slotData === 'string' ? slotData : (slotData?.name || '');
+                                                                const isCancelled = slotData?.cancelled || false;
                                                                 const dateInfo = week.dates[idx];
                                                                 const isCurrentMonth = dateInfo && dateInfo.isCurrentMonth;
                                                                 
@@ -1238,29 +1279,87 @@
                                                                         {!isCurrentMonth ? (
                                                                             <span style={{ color: '#ccc' }}>-</span>
                                                                         ) : isEditing ? (
-                                                                            <select
-                                                                                value={slotValue}
-                                                                                onChange={(e) => handleSlotChange(slotKey, e.target.value)}
-                                                                                style={{
-                                                                                    width: '100%',
-                                                                                    padding: '6px',
-                                                                                    border: '1px solid #ddd',
-                                                                                    borderRadius: '4px',
-                                                                                    fontSize: '14px',
-                                                                                    textAlign: 'center'
-                                                                                }}
-                                                                            >
-                                                                                <option value="">선택</option>
-                                                                                {employees.map(emp => (
-                                                                                    <option key={emp.id} value={emp.name}>
-                                                                                        {emp.name}
-                                                                                    </option>
-                                                                                ))}
-                                                                            </select>
+                                                                            isCancelled ? (
+                                                                                // 취소된 상태: 취소선 + 드롭다운
+                                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                                                    <span style={{
+                                                                                        fontSize: '14px',
+                                                                                        textDecoration: 'line-through',
+                                                                                        color: '#999'
+                                                                                    }}>
+                                                                                        {slotValue}
+                                                                                    </span>
+                                                                                    <select
+                                                                                        value=""
+                                                                                        onChange={(e) => handleReactivateSlot(slotKey, e.target.value)}
+                                                                                        style={{
+                                                                                            width: '100%',
+                                                                                            padding: '4px',
+                                                                                            border: '1px solid #ddd',
+                                                                                            borderRadius: '4px',
+                                                                                            fontSize: '12px',
+                                                                                            textAlign: 'center'
+                                                                                        }}
+                                                                                    >
+                                                                                        <option value="">변경</option>
+                                                                                        {employees.map(emp => (
+                                                                                            <option key={emp.id} value={emp.name}>
+                                                                                                {emp.name}
+                                                                                            </option>
+                                                                                        ))}
+                                                                                    </select>
+                                                                                </div>
+                                                                            ) : slotValue ? (
+                                                                                // 등록된 상태: 이름 + X 버튼
+                                                                                <div style={{
+                                                                                    display: 'flex',
+                                                                                    alignItems: 'center',
+                                                                                    justifyContent: 'center',
+                                                                                    gap: '5px'
+                                                                                }}>
+                                                                                    <span style={{ fontSize: '14px' }}>{slotValue}</span>
+                                                                                    <button
+                                                                                        onClick={() => handleCancelSlot(slotKey)}
+                                                                                        style={{
+                                                                                            padding: '2px 5px',
+                                                                                            background: '#ff4444',
+                                                                                            color: 'white',
+                                                                                            border: 'none',
+                                                                                            borderRadius: '3px',
+                                                                                            cursor: 'pointer',
+                                                                                            fontSize: '10px'
+                                                                                        }}
+                                                                                    >
+                                                                                        ✕
+                                                                                    </button>
+                                                                                </div>
+                                                                            ) : (
+                                                                                // 빈 상태: 드롭다운
+                                                                                <select
+                                                                                    value=""
+                                                                                    onChange={(e) => handleSlotChange(slotKey, e.target.value)}
+                                                                                    style={{
+                                                                                        width: '100%',
+                                                                                        padding: '6px',
+                                                                                        border: '1px solid #ddd',
+                                                                                        borderRadius: '4px',
+                                                                                        fontSize: '14px',
+                                                                                        textAlign: 'center'
+                                                                                    }}
+                                                                                >
+                                                                                    <option value="">선택</option>
+                                                                                    {employees.map(emp => (
+                                                                                        <option key={emp.id} value={emp.name}>
+                                                                                            {emp.name}
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            )
                                                                         ) : (
                                                                             <span style={{
                                                                                 fontSize: '14px',
-                                                                                color: slotValue ? '#333' : '#999'
+                                                                                color: slotValue ? (isCancelled ? '#999' : '#333') : '#999',
+                                                                                textDecoration: isCancelled ? 'line-through' : 'none'
                                                                             }}>
                                                                                 {slotValue || '-'}
                                                                             </span>
@@ -2650,6 +2749,36 @@
                     leaveAmount = 0.5;
                 } else if (leaveType === '여름휴가' || leaveType === '겨울휴가') {
                     leaveAmount = 0; // 연차 수량에 카운트하지 않음
+                }
+                
+                // 여름휴가, 겨울휴가가 아닌 경우에만 연차 수량 체크
+                if (leaveType !== '여름휴가' && leaveType !== '겨울휴가') {
+                    // 등록하려는 실제 근무일 수 계산 (주말 제외)
+                    let requestedDays = 0;
+                    const tempDate = new Date(startDate);
+                    while (tempDate <= endDate) {
+                        const dayOfWeek = tempDate.getDay();
+                        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                            requestedDays += leaveAmount;
+                        }
+                        tempDate.setDate(tempDate.getDate() + 1);
+                    }
+
+                    // 현재 사용 가능한 연차 수량 계산
+                    const totalLeave = calculateTotalLeave(employeeInfo?.joinDate);
+                    const usedLeave = calculateUsedLeave();
+                    const remainingLeave = totalLeave - usedLeave;
+
+                    // 사용 가능한 연차 수량 체크
+                    if (remainingLeave <= 0) {
+                        alert(`사용 가능한 연차가 없습니다.\n\n총 연차: ${totalLeave}일\n사용한 연차: ${usedLeave}일\n남은 연차: ${remainingLeave}일`);
+                        return;
+                    }
+
+                    if (requestedDays > remainingLeave) {
+                        alert(`사용 가능한 연차를 초과했습니다.\n\n요청한 연차: ${requestedDays}일\n사용 가능한 연차: ${remainingLeave}일\n\n${remainingLeave}일 이하로 신청해주세요.`);
+                        return;
+                    }
                 }
                 
                 // 연속된 연차를 묶기 위한 groupId 생성
