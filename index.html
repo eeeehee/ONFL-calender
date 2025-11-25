@@ -509,14 +509,23 @@
 
         /* 모바일 반응형 스타일 */
         @media (max-width: 768px) {
+            /* 모든 요소에 box-sizing 적용 */
+            * {
+                box-sizing: border-box;
+            }
+
             body {
                 padding: 10px;
                 font-size: 14px;
+                overflow-x: hidden;
+                box-sizing: border-box;
             }
 
             .container {
                 padding: 10px;
                 max-width: 100%;
+                overflow-x: hidden;
+                box-sizing: border-box;
             }
 
             .header {
@@ -536,7 +545,7 @@
             .user-info {
                 display: flex;
                 flex-wrap: wrap;
-                gap: 8px;
+                gap: 5px;
                 width: 100%;
             }
 
@@ -544,21 +553,21 @@
             .user-info > span:first-child {
                 width: 100%;
                 text-align: center;
-                font-size: 12px;
+                font-size: 11px;
                 color: #666;
                 order: 3;
-                padding: 5px 0;
+                padding: 3px 0;
             }
 
-            /* 배지들을 동일한 크기로 가로 배치 */
+            /* 배지들을 작게 동일한 크기로 가로 배치 */
             .user-info > span:not(:first-child) {
-                flex: 1 1 calc(33.333% - 6px);
+                flex: 1 1 calc(33.333% - 4px);
                 min-width: 0;
                 text-align: center;
-                padding: 10px 8px !important;
+                padding: 5px 4px !important;
                 margin: 0 !important;
-                font-size: 12px !important;
-                min-height: 40px;
+                font-size: 10px !important;
+                min-height: 28px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -602,11 +611,40 @@
             .content-card {
                 padding: 15px;
                 margin-bottom: 15px;
+                overflow: hidden;
+                max-width: 100%;
             }
 
             .content-card h2 {
                 font-size: 18px;
                 margin-bottom: 15px;
+            }
+
+            /* 콘텐츠 카드 내부 모든 테이블을 스크롤 가능하게 */
+            .content-card > table,
+            .content-card > div > table,
+            .content-card .employee-list,
+            .content-card .leave-usage-table {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                max-width: 100%;
+            }
+
+            /* 테이블 최소 너비 설정 */
+            .content-card table {
+                min-width: 600px;
+                width: 100%;
+            }
+
+            /* 사원 관리 테이블 */
+            .content-card .employee-list table {
+                min-width: 800px;
+            }
+
+            /* PT 스케줄, 연차 내역 등 특수 테이블 */
+            .content-card > div > div table {
+                min-width: 700px;
             }
 
             /* 캘린더 네비게이션 */
@@ -624,6 +662,7 @@
             .calendar {
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
+                max-width: 100%;
             }
 
             .calendar table {
@@ -735,6 +774,7 @@
                 padding: 15px;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
+                max-width: 100%;
             }
 
             .content-card table {
@@ -745,6 +785,19 @@
             .content-card table th,
             .content-card table td {
                 min-width: 80px;
+            }
+
+            /* 모든 div 래퍼에 스크롤 적용 */
+            .content-card > div {
+                max-width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* 특별히 overflow를 visible로 해야 하는 경우 제외 */
+            .content-card > div[style*="display: grid"],
+            .content-card > div[style*="gap"] {
+                overflow-x: visible;
             }
 
             /* 연차 정보 카드 */
@@ -770,6 +823,7 @@
                 display: block;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
+                max-width: 100%;
             }
 
             .employee-list table {
@@ -864,6 +918,7 @@
                 display: block;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
+                max-width: 100%;
             }
 
             .leave-usage-table table {
@@ -878,22 +933,20 @@
                 background: white;
                 margin-bottom: 20px;
                 max-width: 100%;
-                overflow: hidden;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
             }
 
             /* PT 스케줄 테이블 래퍼 - 카드 내에서 스크롤 */
             .content-card > div > div > div:last-child {
                 overflow-x: auto !important;
                 -webkit-overflow-scrolling: touch;
-                margin-left: -15px;
-                margin-right: -15px;
-                padding-left: 15px;
-                padding-right: 15px;
             }
 
             /* PT 스케줄 테이블 자체 */
             .content-card > div > div table {
                 min-width: 700px;
+                width: 100%;
             }
 
             /* 시간 입력 필드 */
