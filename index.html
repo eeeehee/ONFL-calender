@@ -716,18 +716,52 @@
                 min-height: 32px !important;
             }
 
-            /* PT 스케줄 수정 시 X 버튼 크기 축소 */
-            .content-card td button[style*="background: #ff4444"] {
-                width: 9px !important;
-                height: 9px !important;
-                min-width: 9px !important;
+            /* PT 스케줄 수정 시 X 버튼 크기 */
+            .content-card td button[style*="background: #ff4444"],
+            .content-card .slot-cancel-btn {
+                width: 30px !important;
+                height: 30px !important;
+                min-width: 30px !important;
                 padding: 0 !important;
-                font-size: 8px !important;
+                font-size: 20px !important;
+                font-weight: bold !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
                 line-height: 1 !important;
-                border-radius: 2px !important;
+                border-radius: 0 !important;
+                background: transparent !important;
+                color: #ff0000 !important;
+                border: none !important;
+            }
+
+            .content-card td button[style*="background: #ff4444"]:active,
+            .content-card .slot-cancel-btn:active {
+                transform: scale(1.2) !important;
+                color: #cc0000 !important;
+            }
+
+            /* PT 스케줄 시간 슬롯 삭제 버튼 크기 */
+            .content-card .time-slot-delete-btn {
+                width: 30px !important;
+                height: 30px !important;
+                min-width: 30px !important;
+                padding: 0 !important;
+                font-size: 20px !important;
+                font-weight: bold !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                line-height: 1 !important;
+                border-radius: 0 !important;
+                background: transparent !important;
+                color: #ff0000 !important;
+                border: none !important;
+            }
+
+            .content-card .time-slot-delete-btn:active {
+                transform: scale(1.2) !important;
+                color: #cc0000 !important;
             }
 
             /* 캘린더 */
@@ -786,28 +820,29 @@
 
             /* 캘린더 X 버튼 */
             .calendar .schedule-item button {
-                min-height: 18px;
-                height: 18px;
-                width: 18px;
-                min-width: 18px;
+                min-height: 20px;
+                height: 20px;
+                width: 20px;
+                min-width: 20px;
                 padding: 0;
-                font-size: 11px;
+                font-size: 16px;
+                font-weight: bold;
                 line-height: 1;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                border-radius: 3px;
+                border-radius: 0;
                 vertical-align: middle;
-                background: rgba(255, 255, 255, 0.9);
-                color: #ff4444;
-                font-weight: bold;
+                background: transparent;
+                color: #ff0000;
                 border: none;
                 flex-shrink: 0;
             }
 
             .calendar .schedule-item button:active {
-                background: rgba(255, 255, 255, 1);
-                transform: scale(0.95);
+                background: transparent;
+                transform: scale(1.2);
+                color: #cc0000;
             }
 
             /* 테이블 */
@@ -926,6 +961,13 @@
                 font-size: 13px;
                 margin-bottom: 5px;
                 display: block;
+            }
+
+            /* 체크박스가 있는 label만 flex 유지 */
+            .form-group label:has(input[type="checkbox"]) {
+                display: flex !important;
+                flex-direction: row !important;
+                align-items: center !important;
             }
 
             .form-group input,
@@ -1084,6 +1126,90 @@
                 font-size: 12px !important;
             }
 
+            /* 연차 승인 관리 모바일 최적화 */
+            
+            /* 담당 사원 목록 */
+            .employee-section {
+                padding: 12px !important;
+            }
+
+            .employee-section h3 {
+                font-size: 14px !important;
+                margin-bottom: 8px !important;
+            }
+
+            .employee-section span {
+                font-size: 12px !important;
+                padding: 4px 8px !important;
+            }
+
+            .employee-section p {
+                font-size: 12px !important;
+            }
+
+            /* 승인 대기 목록 */
+            .approval-list {
+                gap: 12px !important;
+            }
+
+            .approval-card {
+                padding: 15px !important;
+            }
+
+            .approval-card-content {
+                grid-template-columns: 1fr !important;
+                gap: 0 !important;
+                align-items: stretch !important;
+            }
+
+            /* 승인 대기 카드 내 각 항목 */
+            .approval-card-content > div {
+                padding: 10px 0 !important;
+                border-bottom: 1px solid #f0f0f0 !important;
+            }
+
+            .approval-card-content > div:first-child {
+                padding-top: 0 !important;
+            }
+
+            .approval-card-content > div:last-child {
+                border-bottom: none !important;
+                padding-bottom: 0 !important;
+                padding-top: 15px !important;
+            }
+
+            /* 텍스트 크기 조정 */
+            .approval-card-content div[style*="fontSize: '12px'"] {
+                font-size: 11px !important;
+            }
+
+            .approval-card-content div[style*="fontSize: '18px'"] {
+                font-size: 16px !important;
+            }
+
+            .approval-card-content div[style*="fontSize: '16px'"] {
+                font-size: 14px !important;
+            }
+
+            .approval-card-content div[style*="fontSize: '14px'"] {
+                font-size: 13px !important;
+            }
+
+            /* 승인/반려 버튼 */
+            .approval-buttons {
+                flex-direction: row !important;
+                gap: 6px !important;
+                width: 100% !important;
+            }
+
+            .approval-buttons button {
+                flex: 1 !important;
+                padding: 12px 8px !important;
+                font-size: 13px !important;
+                min-width: 0 !important;
+                white-space: nowrap !important;
+            }
+
             /* 로그인 화면 */
             .login-container {
                 padding: 20px;
@@ -1095,21 +1221,31 @@
             }
 
             /* 로그인 화면 체크박스 정렬 */
-            .login-container label {
+            .login-container .form-group label {
+                display: block;
+            }
+            
+            /* 체크박스를 포함한 label만 flex로 */
+            .login-container .form-group:last-of-type label,
+            .login-container label:has(input[type="checkbox"]) {
                 display: flex !important;
                 align-items: center !important;
                 justify-content: flex-start !important;
                 flex-direction: row !important;
+                white-space: nowrap !important;
             }
 
             .login-container input[type="checkbox"] {
                 margin: 0 6px 0 0 !important;
                 flex-shrink: 0 !important;
+                width: 16px !important;
+                height: 16px !important;
             }
-
-            /* 로그인 체크박스가 있는 form-group의 label만 flex 유지 */
-            .login-container .form-group label {
-                display: flex !important;
+            
+            /* 아이디 저장 텍스트 */
+            .login-container input[type="checkbox"] + * {
+                display: inline !important;
+                white-space: nowrap !important;
             }
 
             /* 스크롤바 숨기기 (모바일) */
@@ -1230,6 +1366,16 @@
                 white-space: nowrap;
                 padding: 6px 4px;
                 font-size: 12px;
+            }
+
+            /* 연차 내역 테이블의 취소 버튼을 승인완료 박스와 동일한 크기로 */
+            .leave-history table button {
+                min-height: auto !important;
+                height: auto !important;
+                padding: 4px 8px !important;
+                font-size: 12px !important;
+                line-height: 1.2 !important;
+                display: inline-block !important;
             }
 
             /* PT 스케줄 주차 카드 */
@@ -2057,6 +2203,7 @@
                                                                         />
                                                                         <button
                                                                             onClick={() => handleRemoveTimeSlot(time)}
+                                                                            className="time-slot-delete-btn"
                                                                             style={{
                                                                                 padding: '2px 6px',
                                                                                 background: '#ff4444',
@@ -2132,6 +2279,7 @@
                                                                                     <span style={{ fontSize: '14px' }}>{slotValue}</span>
                                                                                     <button
                                                                                         onClick={() => handleCancelSlot(slotKey)}
+                                                                                        className="slot-cancel-btn"
                                                                                         style={{
                                                                                             width: '18px',
                                                                                             height: '18px',
@@ -4870,7 +5018,7 @@
                 <div className="content-card">
                     <h2 style={{marginBottom: '20px'}}>연차 승인 관리</h2>
                     
-                    <div style={{
+                    <div className="employee-section" style={{
                         background: '#f5f5f5',
                         padding: '15px',
                         borderRadius: '8px',
@@ -4898,9 +5046,9 @@
                     
                     <h3 style={{fontSize: '16px', marginBottom: '15px'}}>승인 대기 목록</h3>
                     {pendingRequests.length > 0 ? (
-                        <div style={{display: 'grid', gap: '15px'}}>
+                        <div className="approval-list" style={{display: 'grid', gap: '15px'}}>
                             {pendingRequests.map(request => (
-                                <div key={request.id} style={{
+                                <div key={request.id} className="approval-card" style={{
                                     background: 'white',
                                     border: '1px solid #e0e0e0',
                                     borderRadius: '12px',
@@ -4911,7 +5059,7 @@
                                         boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
                                     }
                                 }}>
-                                    <div style={{
+                                    <div className="approval-card-content" style={{
                                         display: 'grid',
                                         gridTemplateColumns: '1fr 1fr 1fr auto',
                                         gap: '20px',
@@ -4993,7 +5141,7 @@
                                         </div>
 
                                         {/* 승인/반려 버튼 */}
-                                        <div style={{display: 'flex', gap: '8px'}}>
+                                        <div className="approval-buttons" style={{display: 'flex', gap: '8px'}}>
                                             {request.requestType === 'deletion' ? (
                                                 <>
                                                     <button
@@ -5785,6 +5933,7 @@
             const [isApprover, setIsApprover] = useState(false);
             const [isPTScheduleEditor, setIsPTScheduleEditor] = useState(false);
             const [pendingCount, setPendingCount] = useState(0);
+            const [userName, setUserName] = useState('');
 
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -5796,9 +5945,11 @@
                             const isAdminUser = employeeDoc.data().isAdmin || false;
                             const isApproverUser = employeeDoc.data().isApprover || false;
                             const isPTScheduleEditorUser = employeeDoc.data().isPTScheduleEditor || false;
+                            const name = employeeDoc.data().name || user.email;
                             setIsAdmin(isAdminUser);
                             setIsApprover(isApproverUser);
                             setIsPTScheduleEditor(isPTScheduleEditorUser);
+                            setUserName(name);
                             
                             // 승인자라면 대기 건수 바로 로드
                             if (isApproverUser && !isAdminUser) {
@@ -5870,6 +6021,7 @@
             const handleLogout = async () => {
                 await auth.signOut();
                 setActiveTab('calendar');
+                setUserName('');
             };
 
             if (loading) {
@@ -5885,7 +6037,7 @@
                     <div className="header">
                         <h1>스케쥴 및 연차 관리</h1>
                         <div className="user-info">
-                            <span>{user.email}</span>
+                            <span>{userName || user.email}</span>
                             {isAdmin && <span style={{
                                 background: '#4CAF50',
                                 color: 'white',
