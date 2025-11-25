@@ -731,6 +731,557 @@
             }
         };
 
+        // PT 스케줄 관리 컴포넌트
+        function PTSchedule({ user, isPTScheduleEditor }) {
+            const [currentDate, setCurrentDate] = useState(new Date());
+            const [weekSchedules, setWeekSchedules] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [editingWeek, setEditingWeek] = useState(null);
+            const [tempSlots, setTempSlots] = useState({});
+            const [tempTimeSlots, setTempTimeSlots] = useState([]);
+            const [employees, setEmployees] = useState([]);
+
+            const defaultTimeSlots = ['12:00', '13:00', '14:00', '15:00', '16:00'];
+            const weekDays = ['월', '화', '수', '목', '금'];
+
+            useEffect(() => {
+                loadEmployees();
+                loadMonthSchedules();
+            }, [currentDate]);
+
+            const loadEmployees = async () => {
+                try {
+                    const snapshot = await db.collection('employees').get();
+                    const employeeList = [];
+                    snapshot.forEach(doc => {
+                        employeeList.push({ id: doc.id, ...doc.data() });
+                    });
+                    setEmployees(employeeList);
+                } catch (error) {
+                    console.error('사원 목록 로드 실패:', error);
+                }
+            };
+
+            // 해당 월의 주차별 날짜 계산 (월초/월말 날짜 모두 포함)
+            const getWeeksInMonth = (year, month) => {
+                const weeks = [];
+                const firstDay = new Date(year, month, 1);
+                const lastDay = new Date(year, month + 1, 0);
+                
+                // 월의 첫 날이 속한 주의 월요일 찾기 (이전 월일 수 있음)
+                let weekStart = new Date(firstDay);
+                const firstDayOfWeek = firstDay.getDay(); // 0(일) ~ 6(토)
+                
+                // 월요일(1)로 조정
+                if (firstDayOfWeek === 0) {
+                    // 일요일이면 전주 월요일
+                    weekStart.setDate(weekStart.getDate() - 6);
+                } else if (firstDayOfWeek !== 1) {
+                    // 월요일이 아니면 그 주의 월요일로
+                    weekStart.setDate(weekStart.getDate() - (firstDayOfWeek - 1));
+                }
+
+                let weekNumber = 1;
+                let currentWeekStart = new Date(weekStart);
+
+                // 마지막 날이 속한 주까지 반복
+                while (currentWeekStart <= lastDay) {
+                    const dates = [];
+                    
+                    // 월~금 5일간의 날짜 수집
+                    for (let i = 0; i < 5; i++) {
+                        const date = new Date(currentWeekStart);
+                        date.setDate(currentWeekStart.getDate() + i);
+                        dates.push({
+                            date: new Date(date),
+                            isCurrentMonth: date.getMonth() === month
+                        });
+                    }
+
+                    // 해당 주에 현재 월의 날짜가 하나라도 있으면 주차 추가
+                    const hasCurrentMonthDate = dates.some(d => d.isCurrentMonth);
+                    
+                    if (hasCurrentMonthDate) {
+                        // 실제 시작일과 종료일 계산 (현재 월 기준)
+                        const currentMonthDates = dates.filter(d => d.isCurrentMonth).map(d => d.date);
+                        const weekStartDate = currentMonthDates[0];
+                        const weekEndDate = currentMonthDates[currentMonthDates.length - 1];
+                        
+                        weeks.push({
+                            weekNumber: weekNumber,
+                            startDate: new Date(weekStartDate),
+                            endDate: new Date(weekEndDate),
+                            dates: dates
+                        });
+                        weekNumber++;
+                    }
+
+                    // 다음 주 월요일로 이동
+                    currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+                }
+
+                return weeks;
+            };
+
+            const formatDate = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            const loadMonthSchedules = async () => {
+                setLoading(true);
+                try {
+                    const year = currentDate.getFullYear();
+                    const month = currentDate.getMonth();
+                    const weeks = getWeeksInMonth(year, month);
+
+                    const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+                    
+                    // 해당 월의 모든 스케줄 로드
+                    const snapshot = await db.collection('ptSchedules').doc(yearMonth).get();
+                    const scheduleData = snapshot.exists ? snapshot.data() : {};
+
+                    const schedulesWithData = weeks.map(week => {
+                        const weekKey = `week${week.weekNumber}`;
+                        const weekData = scheduleData[weekKey] || {};
+                        
+                        // 해당 주차의 시간 슬롯 추출
+                        const timeSlots = weekData.timeSlots || defaultTimeSlots;
+                        const slots = weekData.slots || {};
+                        
+                        return {
+                            ...week,
+                            timeSlots: timeSlots,
+                            slots: slots
+                        };
+                    });
+
+                    setWeekSchedules(schedulesWithData);
+                } catch (error) {
+                    console.error('스케줄 로드 실패:', error);
+                }
+                setLoading(false);
+            };
+
+            const handleStartEdit = (weekNumber) => {
+                const week = weekSchedules.find(w => w.weekNumber === weekNumber);
+                if (week) {
+                    setEditingWeek(weekNumber);
+                    setTempSlots({ ...week.slots });
+                    setTempTimeSlots([...week.timeSlots]);
+                }
+            };
+
+            const handleCancelEdit = () => {
+                setEditingWeek(null);
+                setTempSlots({});
+                setTempTimeSlots([]);
+            };
+
+            const handleSaveEdit = async (weekNumber) => {
+                try {
+                    const year = currentDate.getFullYear();
+                    const month = currentDate.getMonth();
+                    const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+                    const weekKey = `week${weekNumber}`;
+
+                    await db.collection('ptSchedules').doc(yearMonth).set({
+                        [weekKey]: {
+                            timeSlots: tempTimeSlots,
+                            slots: tempSlots
+                        }
+                    }, { merge: true });
+
+                    alert('저장되었습니다.');
+                    setEditingWeek(null);
+                    setTempSlots({});
+                    setTempTimeSlots([]);
+                    loadMonthSchedules();
+                } catch (error) {
+                    console.error('저장 실패:', error);
+                    alert('저장 실패: ' + error.message);
+                }
+            };
+
+            const handleSlotChange = (slotKey, value) => {
+                setTempSlots(prev => ({
+                    ...prev,
+                    [slotKey]: value
+                }));
+            };
+
+            const handleAddTimeSlot = () => {
+                const newTime = prompt('추가할 시간을 입력하세요 (예: 17:00, 09:30)');
+                if (!newTime) return;
+                
+                // 시간 형식 검증
+                if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(newTime)) {
+                    alert('올바른 시간 형식이 아닙니다.\n예시: 17:00, 09:30, 14:15');
+                    return;
+                }
+                
+                // 중복 체크
+                if (tempTimeSlots.includes(newTime)) {
+                    alert('이미 존재하는 시간입니다.');
+                    return;
+                }
+                
+                setTempTimeSlots(prev => [...prev, newTime].sort());
+            };
+
+            const handleRemoveTimeSlot = (timeToRemove) => {
+                if (!confirm(`${timeToRemove} 시간대를 삭제하시겠습니까?\n해당 시간의 모든 데이터가 삭제됩니다.`)) return;
+                
+                // 시간 슬롯에서 제거
+                setTempTimeSlots(prev => prev.filter(t => t !== timeToRemove));
+                
+                // 해당 시간의 모든 슬롯 데이터 제거
+                const newSlots = { ...tempSlots };
+                weekDays.forEach(day => {
+                    delete newSlots[`${day}-${timeToRemove}`];
+                });
+                setTempSlots(newSlots);
+            };
+
+            const handleTimeSlotChange = (oldTime, newTime) => {
+                if (!newTime) {
+                    return;
+                }
+                
+                if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(newTime)) {
+                    alert('올바른 시간 형식이 아닙니다 (예: 17:00)');
+                    return;
+                }
+
+                // 시간 슬롯 업데이트
+                setTempTimeSlots(prev => prev.map(t => t === oldTime ? newTime : t));
+
+                // 슬롯 데이터의 키 업데이트
+                const newSlots = { ...tempSlots };
+                weekDays.forEach(day => {
+                    const oldKey = `${day}-${oldTime}`;
+                    const newKey = `${day}-${newTime}`;
+                    if (newSlots[oldKey]) {
+                        newSlots[newKey] = newSlots[oldKey];
+                        delete newSlots[oldKey];
+                    }
+                });
+                setTempSlots(newSlots);
+            };
+
+            const handlePrevMonth = () => {
+                setCurrentDate(prev => {
+                    const newDate = new Date(prev);
+                    newDate.setMonth(prev.getMonth() - 1);
+                    return newDate;
+                });
+                setEditingWeek(null);
+                setTempSlots({});
+                setTempTimeSlots([]);
+            };
+
+            const handleNextMonth = () => {
+                setCurrentDate(prev => {
+                    const newDate = new Date(prev);
+                    newDate.setMonth(prev.getMonth() + 1);
+                    return newDate;
+                });
+                setEditingWeek(null);
+                setTempSlots({});
+                setTempTimeSlots([]);
+            };
+
+            const handleToday = () => {
+                setCurrentDate(new Date());
+                setEditingWeek(null);
+                setTempSlots({});
+                setTempTimeSlots([]);
+            };
+
+            return (
+                <div className="content-card">
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '20px'
+                    }}>
+                        <h2>PT 스케줄</h2>
+                        <div className="calendar-nav">
+                            <button className="nav-btn" onClick={handlePrevMonth}>◀ 이전달</button>
+                            <button className="nav-btn" onClick={handleToday}>오늘</button>
+                            <button className="nav-btn" onClick={handleNextMonth}>다음달 ▶</button>
+                        </div>
+                    </div>
+
+                    <div style={{
+                        textAlign: 'center',
+                        fontSize: '24px',
+                        fontWeight: 'bold',
+                        marginBottom: '30px',
+                        color: '#333'
+                    }}>
+                        {currentDate.getFullYear()}년 {currentDate.getMonth() + 1}월 PT 스케줄
+                    </div>
+
+                    {loading ? (
+                        <div style={{ textAlign: 'center', padding: '60px', color: '#999' }}>
+                            로딩중...
+                        </div>
+                    ) : weekSchedules.length === 0 ? (
+                        <div style={{
+                            padding: '60px',
+                            textAlign: 'center',
+                            color: '#999',
+                            background: '#f9f9f9',
+                            borderRadius: '8px'
+                        }}>
+                            이번 달은 표시할 주차가 없습니다.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'grid', gap: '30px' }}>
+                            {weekSchedules.map(week => {
+                                const isEditing = editingWeek === week.weekNumber;
+                                const displaySlots = isEditing ? tempSlots : week.slots;
+                                const displayTimeSlots = isEditing ? tempTimeSlots : week.timeSlots;
+
+                                return (
+                                    <div key={week.weekNumber} style={{
+                                        border: '1px solid #ddd',
+                                        borderRadius: '8px',
+                                        padding: '20px',
+                                        background: 'white'
+                                    }}>
+                                        <div style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            marginBottom: '15px'
+                                        }}>
+                                            <div>
+                                                <h3 style={{ fontSize: '18px', marginBottom: '5px' }}>
+                                                    💪 {week.weekNumber}주차
+                                                </h3>
+                                                <p style={{ fontSize: '14px', color: '#666' }}>
+                                                    {formatDate(week.startDate)} ~ {formatDate(week.endDate)}
+                                                </p>
+                                            </div>
+                                            {isPTScheduleEditor && (
+                                                <div style={{ display: 'flex', gap: '8px' }}>
+                                                    {isEditing ? (
+                                                        <>
+                                                            <button
+                                                                onClick={handleAddTimeSlot}
+                                                                style={{
+                                                                    padding: '8px 16px',
+                                                                    background: '#FF9800',
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    borderRadius: '6px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '14px'
+                                                                }}
+                                                            >
+                                                                + 시간 추가
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleSaveEdit(week.weekNumber)}
+                                                                style={{
+                                                                    padding: '8px 16px',
+                                                                    background: '#4CAF50',
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    borderRadius: '6px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '14px'
+                                                                }}
+                                                            >
+                                                                저장
+                                                            </button>
+                                                            <button
+                                                                onClick={handleCancelEdit}
+                                                                style={{
+                                                                    padding: '8px 16px',
+                                                                    background: '#999',
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    borderRadius: '6px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '14px'
+                                                                }}
+                                                            >
+                                                                취소
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleStartEdit(week.weekNumber)}
+                                                            style={{
+                                                                padding: '8px 16px',
+                                                                background: '#2196F3',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '6px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '14px'
+                                                            }}
+                                                        >
+                                                            수정
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div style={{ overflowX: 'auto' }}>
+                                            <table style={{
+                                                width: '100%',
+                                                borderCollapse: 'collapse',
+                                                minWidth: '700px'
+                                            }}>
+                                                <thead>
+                                                    <tr>
+                                                        <th style={{
+                                                            padding: '12px',
+                                                            background: '#f5f5f5',
+                                                            border: '1px solid #ddd',
+                                                            fontWeight: '600',
+                                                            width: '100px'
+                                                        }}>Time</th>
+                                                        {weekDays.map((day, idx) => {
+                                                            const dateInfo = week.dates[idx];
+                                                            return (
+                                                                <th key={day} style={{
+                                                                    padding: '12px',
+                                                                    background: '#f5f5f5',
+                                                                    border: '1px solid #ddd',
+                                                                    fontWeight: '600'
+                                                                }}>
+                                                                    <div>{day}</div>
+                                                                    {dateInfo && (
+                                                                        <div style={{ 
+                                                                            fontSize: '12px', 
+                                                                            color: dateInfo.isCurrentMonth ? '#999' : '#ccc',
+                                                                            fontWeight: 'normal' 
+                                                                        }}>
+                                                                            {dateInfo.date.getDate()}일
+                                                                        </div>
+                                                                    )}
+                                                                </th>
+                                                            );
+                                                        })}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {displayTimeSlots.map(time => (
+                                                        <tr key={time}>
+                                                            <td style={{
+                                                                padding: '10px',
+                                                                border: '1px solid #ddd',
+                                                                fontWeight: '500',
+                                                                background: '#fafafa',
+                                                                textAlign: 'center'
+                                                            }}>
+                                                                {isEditing ? (
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', justifyContent: 'center' }}>
+                                                                        <input
+                                                                            type="text"
+                                                                            defaultValue={time}
+                                                                            onBlur={(e) => {
+                                                                                if (e.target.value && e.target.value !== time) {
+                                                                                    handleTimeSlotChange(time, e.target.value);
+                                                                                }
+                                                                            }}
+                                                                            placeholder="HH:MM"
+                                                                            style={{
+                                                                                width: '70px',
+                                                                                padding: '4px',
+                                                                                border: '1px solid #ddd',
+                                                                                borderRadius: '4px',
+                                                                                fontSize: '13px',
+                                                                                textAlign: 'center'
+                                                                            }}
+                                                                        />
+                                                                        <button
+                                                                            onClick={() => handleRemoveTimeSlot(time)}
+                                                                            style={{
+                                                                                padding: '2px 6px',
+                                                                                background: '#ff4444',
+                                                                                color: 'white',
+                                                                                border: 'none',
+                                                                                borderRadius: '4px',
+                                                                                cursor: 'pointer',
+                                                                                fontSize: '11px'
+                                                                            }}
+                                                                        >
+                                                                            ✕
+                                                                        </button>
+                                                                    </div>
+                                                                ) : time}
+                                                            </td>
+                                                            {weekDays.map((day, idx) => {
+                                                                const slotKey = `${day}-${time}`;
+                                                                const slotValue = displaySlots?.[slotKey] || '';
+                                                                const dateInfo = week.dates[idx];
+                                                                const isCurrentMonth = dateInfo && dateInfo.isCurrentMonth;
+                                                                
+                                                                return (
+                                                                    <td key={slotKey} style={{
+                                                                        padding: '8px',
+                                                                        border: '1px solid #ddd',
+                                                                        textAlign: 'center',
+                                                                        minHeight: '50px',
+                                                                        background: !isCurrentMonth ? '#f5f5f5' : 'white'
+                                                                    }}>
+                                                                        {!isCurrentMonth ? (
+                                                                            <span style={{ color: '#ccc' }}>-</span>
+                                                                        ) : isEditing ? (
+                                                                            <select
+                                                                                value={slotValue}
+                                                                                onChange={(e) => handleSlotChange(slotKey, e.target.value)}
+                                                                                style={{
+                                                                                    width: '100%',
+                                                                                    padding: '6px',
+                                                                                    border: '1px solid #ddd',
+                                                                                    borderRadius: '4px',
+                                                                                    fontSize: '14px',
+                                                                                    textAlign: 'center'
+                                                                                }}
+                                                                            >
+                                                                                <option value="">선택</option>
+                                                                                {employees.map(emp => (
+                                                                                    <option key={emp.id} value={emp.name}>
+                                                                                        {emp.name}
+                                                                                    </option>
+                                                                                ))}
+                                                                            </select>
+                                                                        ) : (
+                                                                            <span style={{
+                                                                                fontSize: '14px',
+                                                                                color: slotValue ? '#333' : '#999'
+                                                                            }}>
+                                                                                {slotValue || '-'}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                );
+                                                            })}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         // Slack 설정 컴포넌트
         function SlackSettings() {
             const [webhookUrl, setWebhookUrl] = useState('');
@@ -2137,7 +2688,7 @@
             };
 
             const handleAddEmployee = async () => {
-                if (!newEmployee.email || !newEmployee.name || !newEmployee.phone || !newEmployee.joinDate || !newEmployee.password) {
+                if (!newEmployee.email || !newEmployee.name || !newEmployee.joinDate || !newEmployee.password) {
                     alert('필수 필드를 입력해주세요.');
                     return;
                 }
@@ -2199,6 +2750,18 @@
                 }
             };
 
+            const handleTogglePTScheduleEditor = async (employeeId, currentStatus) => {
+                try {
+                    await db.collection('employees').doc(employeeId).update({
+                        isPTScheduleEditor: !currentStatus
+                    });
+                    alert('PT 스케줄 편집 권한이 ' + (!currentStatus ? '부여' : '해제') + '되었습니다.');
+                    loadEmployees();
+                } catch (error) {
+                    alert('권한 변경 실패: ' + error.message);
+                }
+            };
+
             const handleDeleteEmployee = async (employeeId) => {
                 if (!confirm('정말 삭제하시겠습니까?')) return;
 
@@ -2235,6 +2798,53 @@
 
             const handleCancelEdit = () => {
                 setEditingEmployeeId(null);
+            };
+
+            const handleResetPassword = async (employeeId, employeeEmail) => {
+                if (!confirm('선택한 사원의 비밀번호를 초기화하시겠습니까?\n초기화 비밀번호: 1q2w3e4r%T')) return;
+
+                try {
+                    // 현재 로그인된 관리자 정보 저장
+                    const currentUser = auth.currentUser;
+                    const currentEmail = currentUser.email;
+                    const currentPassword = prompt('관리자 비밀번호를 입력하세요 (계정 유지를 위해 필요합니다):');
+                    
+                    if (!currentPassword) {
+                        alert('비밀번호가 필요합니다.');
+                        return;
+                    }
+
+                    // 해당 사원으로 로그인
+                    const tempPassword = prompt('해당 사원의 현재 비밀번호를 입력하세요:');
+                    if (!tempPassword) {
+                        alert('현재 비밀번호가 필요합니다.');
+                        return;
+                    }
+
+                    await auth.signInWithEmailAndPassword(employeeEmail, tempPassword);
+                    
+                    // 비밀번호 변경
+                    const user = auth.currentUser;
+                    await user.updatePassword('1q2w3e4r%T');
+                    
+                    // 관리자 계정으로 다시 로그인
+                    await auth.signInWithEmailAndPassword(currentEmail, currentPassword);
+
+                    alert('비밀번호가 초기화되었습니다.\n새 비밀번호: 1q2w3e4r%T');
+                } catch (error) {
+                    // 오류 발생 시 관리자로 재로그인 시도
+                    try {
+                        const currentEmail = auth.currentUser?.email;
+                        if (!currentEmail) {
+                            const adminEmail = prompt('관리자 이메일을 입력하세요:');
+                            const adminPassword = prompt('관리자 비밀번호를 입력하세요:');
+                            await auth.signInWithEmailAndPassword(adminEmail, adminPassword);
+                        }
+                    } catch (reLoginError) {
+                        console.error('재로그인 실패:', reLoginError);
+                    }
+                    alert('비밀번호 초기화 실패: ' + error.message);
+                }
             };
 
             const handleAssignApprovalLine = async (employeeId, approvalLineId) => {
@@ -2279,6 +2889,7 @@
                                         <th>입사일</th>
                                         <th>Slack ID</th>
                                         <th>승인자 권한</th>
+                                        <th>PT 편집 권한</th>
                                         <th>결재선 선택</th>
                                         <th>관리</th>
                                     </tr>
@@ -2361,6 +2972,25 @@
                                                 </label>
                                             </td>
                                             <td>
+                                                <label style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    cursor: 'pointer'
+                                                }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={emp.isPTScheduleEditor || false}
+                                                        onChange={() => handleTogglePTScheduleEditor(emp.id, emp.isPTScheduleEditor)}
+                                                        style={{
+                                                            cursor: 'pointer',
+                                                            width: '18px',
+                                                            height: '18px'
+                                                        }}
+                                                    />
+                                                </label>
+                                            </td>
+                                            <td>
                                                 {!emp.isApprover ? (
                                                     <select
                                                         value={emp.approvalLine || ''}
@@ -2424,7 +3054,7 @@
                                                         </button>
                                                     </div>
                                                 ) : (
-                                                    <div style={{display: 'flex', gap: '5px'}}>
+                                                    <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap'}}>
                                                         <button
                                                             onClick={() => handleEditEmployee(emp.id)}
                                                             style={{
@@ -2438,6 +3068,20 @@
                                                             }}
                                                         >
                                                             수정
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleResetPassword(emp.id, emp.email)}
+                                                            style={{
+                                                                padding: '6px 12px',
+                                                                background: '#FF9800',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '12px'
+                                                            }}
+                                                        >
+                                                            PW초기화
                                                         </button>
                                                         <button
                                                             className="delete-btn"
@@ -2476,7 +3120,7 @@
                                     />
                                 </div>
                                 <div className="form-group">
-                                    <label>연락처</label>
+                                    <label>연락처 (선택)</label>
                                     <input
                                         type="text"
                                         value={newEmployee.phone}
@@ -3809,6 +4453,7 @@
             const [employees, setEmployees] = useState([]);
             const [isAdmin, setIsAdmin] = useState(false);
             const [isApprover, setIsApprover] = useState(false);
+            const [isPTScheduleEditor, setIsPTScheduleEditor] = useState(false);
             const [pendingCount, setPendingCount] = useState(0);
 
             useEffect(() => {
@@ -3820,8 +4465,10 @@
                         if (employeeDoc.exists) {
                             const isAdminUser = employeeDoc.data().isAdmin || false;
                             const isApproverUser = employeeDoc.data().isApprover || false;
+                            const isPTScheduleEditorUser = employeeDoc.data().isPTScheduleEditor || false;
                             setIsAdmin(isAdminUser);
                             setIsApprover(isApproverUser);
+                            setIsPTScheduleEditor(isPTScheduleEditorUser);
                             
                             // 승인자라면 대기 건수 바로 로드
                             if (isApproverUser && !isAdminUser) {
@@ -3925,6 +4572,14 @@
                                 fontSize: '12px',
                                 marginLeft: '10px'
                             }}>승인자</span>}
+                            {isPTScheduleEditor && <span style={{
+                                background: '#FF9800',
+                                color: 'white',
+                                padding: '4px 8px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                marginLeft: '10px'
+                            }}>PT편집자</span>}
                             <button className="logout-btn" onClick={handleLogout}>로그아웃</button>
                         </div>
                     </div>
@@ -3944,6 +4599,12 @@
                                 연차 관리
                             </button>
                         )}
+                        <button
+                            className={`tab ${activeTab === 'pt-schedule' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('pt-schedule')}
+                        >
+                            PT 스케줄
+                        </button>
                         {isApprover && !isAdmin && (
                             <button
                                 className={`tab ${activeTab === 'approval' ? 'active' : ''}`}
@@ -4005,6 +4666,7 @@
 
                     {activeTab === 'calendar' && <Calendar user={user} employees={employees} />}
                     {activeTab === 'leave' && <AnnualLeave user={user} />}
+                    {activeTab === 'pt-schedule' && <PTSchedule user={user} isPTScheduleEditor={isPTScheduleEditor || isAdmin} />}
                     {activeTab === 'approval' && isApprover && <ApprovalManagement user={user} setPendingCount={setPendingCount} />}
                     {activeTab === 'admin-leave' && isAdmin && <AdminLeaveManagement />}
                     {activeTab === 'approval-line' && isAdmin && <ApprovalLineManagement />}
