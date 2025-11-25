@@ -694,11 +694,19 @@
                 justify-content: center !important;
             }
 
+            /* PT 스케줄 주차 정보와 버튼을 세로로 배치 */
+            .content-card > div > div > div[style*="display: flex"][style*="space-between"] {
+                flex-direction: column !important;
+                align-items: flex-start !important;
+                gap: 10px !important;
+            }
+
             /* PT 스케줄 수정 버튼 가로 정렬 */
             .pt-schedule-buttons {
-                flex-wrap: nowrap !important;
+                flex-wrap: wrap !important;
                 gap: 4px !important;
-                justify-content: center !important;
+                justify-content: flex-start !important;
+                width: 100% !important;
             }
 
             .pt-schedule-buttons button {
@@ -710,16 +718,16 @@
 
             /* PT 스케줄 수정 시 X 버튼 크기 축소 */
             .content-card td button[style*="background: #ff4444"] {
-                width: 18px !important;
-                height: 18px !important;
-                min-width: 18px !important;
+                width: 9px !important;
+                height: 9px !important;
+                min-width: 9px !important;
                 padding: 0 !important;
-                font-size: 11px !important;
+                font-size: 8px !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
                 line-height: 1 !important;
-                border-radius: 3px !important;
+                border-radius: 2px !important;
             }
 
             /* 캘린더 */
@@ -899,8 +907,10 @@
 
             .modal-content input[type="checkbox"] {
                 flex-shrink: 0 !important;
-                margin: 0 4px 0 0 !important;
+                margin: 0 2px 0 0 !important;
                 padding: 0 !important;
+                width: 14px !important;
+                height: 14px !important;
             }
 
             .modal-content .form-group label {
@@ -1089,11 +1099,17 @@
                 display: flex !important;
                 align-items: center !important;
                 justify-content: flex-start !important;
+                flex-direction: row !important;
             }
 
             .login-container input[type="checkbox"] {
                 margin: 0 6px 0 0 !important;
                 flex-shrink: 0 !important;
+            }
+
+            /* 로그인 체크박스가 있는 form-group의 label만 flex 유지 */
+            .login-container .form-group label {
+                display: flex !important;
             }
 
             /* 스크롤바 숨기기 (모바일) */
