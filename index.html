@@ -506,6 +506,372 @@
             margin-top: 10px;
             text-align: center;
         }
+
+        /* 모바일 반응형 스타일 */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+                font-size: 14px;
+            }
+
+            .container {
+                padding: 10px;
+                max-width: 100%;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 10px;
+                padding: 15px;
+                align-items: stretch;
+            }
+
+            .header h1 {
+                font-size: 20px;
+                text-align: center;
+            }
+
+            .header-right {
+                width: 100%;
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .badge {
+                font-size: 11px;
+                padding: 3px 8px;
+            }
+
+            .logout-btn {
+                width: 100%;
+                margin-top: 10px;
+            }
+
+            /* 탭 메뉴 */
+            .tabs {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                gap: 5px;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                padding-bottom: 5px;
+            }
+
+            .tabs::-webkit-scrollbar {
+                display: none;
+            }
+
+            .tab {
+                font-size: 13px;
+                padding: 10px 12px;
+                white-space: nowrap;
+                min-width: fit-content;
+            }
+
+            /* 콘텐츠 카드 */
+            .content-card {
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            .content-card h2 {
+                font-size: 18px;
+                margin-bottom: 15px;
+            }
+
+            /* 캘린더 네비게이션 */
+            .calendar-nav {
+                flex-wrap: wrap;
+                gap: 5px;
+            }
+
+            .nav-btn {
+                font-size: 12px;
+                padding: 8px 12px;
+            }
+
+            /* 캘린더 */
+            .calendar {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .calendar table {
+                min-width: 100%;
+                font-size: 12px;
+            }
+
+            .calendar th,
+            .calendar td {
+                padding: 8px 4px;
+                min-height: 60px;
+            }
+
+            .day-number {
+                font-size: 14px;
+                margin-bottom: 3px;
+            }
+
+            .schedule-item {
+                font-size: 11px;
+                padding: 3px 5px;
+                margin-bottom: 2px;
+            }
+
+            /* 테이블 */
+            table {
+                font-size: 13px;
+            }
+
+            table th,
+            table td {
+                padding: 8px 5px;
+            }
+
+            /* 버튼 */
+            button {
+                min-height: 44px; /* 터치 영역 확보 */
+                touch-action: manipulation;
+            }
+
+            .btn {
+                font-size: 14px;
+                padding: 12px 16px;
+            }
+
+            /* 입력 필드 */
+            input[type="text"],
+            input[type="email"],
+            input[type="password"],
+            input[type="date"],
+            input[type="number"],
+            select,
+            textarea {
+                font-size: 16px; /* iOS 줌 방지 */
+                padding: 12px;
+                min-height: 44px;
+            }
+
+            /* 모달 */
+            .modal-content {
+                width: 95%;
+                max-width: 95%;
+                padding: 20px;
+                max-height: 90vh;
+                overflow-y: auto;
+            }
+
+            .modal-content h2 {
+                font-size: 18px;
+                margin-bottom: 15px;
+            }
+
+            /* 폼 그룹 */
+            .form-group {
+                margin-bottom: 15px;
+            }
+
+            .form-group label {
+                font-size: 14px;
+                margin-bottom: 6px;
+            }
+
+            /* PT 스케줄 테이블 */
+            .content-card table {
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .content-card table th,
+            .content-card table td {
+                min-width: 80px;
+            }
+
+            /* 연차 정보 카드 */
+            .leave-info {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .leave-info-item {
+                padding: 12px;
+            }
+
+            .leave-info-item h3 {
+                font-size: 13px;
+            }
+
+            .leave-info-item p {
+                font-size: 22px;
+            }
+
+            /* 사원 관리 테이블 */
+            .employee-list {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .employee-list table {
+                min-width: 800px;
+            }
+
+            /* 페이지네이션 */
+            .pagination {
+                flex-wrap: wrap;
+                gap: 5px;
+            }
+
+            .pagination button {
+                min-width: 36px;
+                min-height: 36px;
+                padding: 8px;
+                font-size: 13px;
+            }
+
+            /* 연차 승인 카드 */
+            .approval-request {
+                padding: 12px;
+            }
+
+            .approval-request h4 {
+                font-size: 15px;
+            }
+
+            .approval-request p {
+                font-size: 13px;
+            }
+
+            /* 로그인 화면 */
+            .login-container {
+                padding: 20px;
+                max-width: 100%;
+            }
+
+            .login-container h2 {
+                font-size: 22px;
+            }
+
+            /* 스크롤바 숨기기 (모바일) */
+            ::-webkit-scrollbar {
+                width: 0;
+                height: 0;
+            }
+
+            /* 터치 최적화 */
+            * {
+                -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+            }
+
+            /* 캘린더 날짜 셀 */
+            .calendar td.other-month {
+                opacity: 0.3;
+            }
+
+            /* 드롭다운 메뉴 */
+            select {
+                background-position: right 8px center;
+                padding-right: 30px;
+            }
+
+            /* 체크박스와 라디오 버튼 크기 */
+            input[type="checkbox"],
+            input[type="radio"] {
+                width: 20px;
+                height: 20px;
+                min-height: 20px;
+            }
+
+            /* Flex 레이아웃 조정 */
+            .flex-container {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            /* 통계 카드 */
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            /* 사원 선택 드롭다운 */
+            .employee-select {
+                width: 100%;
+                margin-bottom: 15px;
+            }
+
+            /* 연차 내역 테이블 모바일 최적화 */
+            .leave-usage-table {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .leave-usage-table table {
+                min-width: 600px;
+            }
+
+            /* PT 스케줄 주차 카드 */
+            .content-card > div > div {
+                padding: 15px;
+            }
+
+            /* 시간 입력 필드 */
+            input[type="time"] {
+                min-width: 100px;
+            }
+
+            /* 취소선 텍스트 가독성 */
+            span[style*="line-through"] {
+                font-size: 13px !important;
+            }
+        }
+
+        /* 아주 작은 화면 (iPhone SE 등) */
+        @media (max-width: 375px) {
+            .header h1 {
+                font-size: 18px;
+            }
+
+            .tab {
+                font-size: 12px;
+                padding: 8px 10px;
+            }
+
+            .content-card {
+                padding: 10px;
+            }
+
+            .content-card h2 {
+                font-size: 16px;
+            }
+
+            .modal-content {
+                padding: 15px;
+            }
+
+            button {
+                font-size: 13px;
+                padding: 10px 12px;
+            }
+        }
+
+        /* 가로 모드 최적화 */
+        @media (max-width: 768px) and (orientation: landscape) {
+            .header {
+                padding: 10px;
+            }
+
+            .content-card {
+                padding: 10px;
+            }
+
+            .modal-content {
+                max-height: 85vh;
+            }
+        }
     </style>
 </head>
 <body>
