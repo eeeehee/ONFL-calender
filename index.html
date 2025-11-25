@@ -679,6 +679,49 @@
                 min-height: 32px;
             }
 
+            /* PT 스케줄 타이틀 모바일에서 숨기기 */
+            .pt-schedule-title {
+                display: none !important;
+            }
+
+            /* PT 스케줄 h2 헤더 모바일에서 숨기기 */
+            .pt-schedule-h2 {
+                display: none !important;
+            }
+
+            /* PT 스케줄 헤더 가운데 정렬 */
+            .pt-schedule-header {
+                justify-content: center !important;
+            }
+
+            /* PT 스케줄 수정 버튼 가로 정렬 */
+            .pt-schedule-buttons {
+                flex-wrap: nowrap !important;
+                gap: 4px !important;
+                justify-content: center !important;
+            }
+
+            .pt-schedule-buttons button {
+                padding: 6px 10px !important;
+                font-size: 11px !important;
+                white-space: nowrap !important;
+                min-height: 32px !important;
+            }
+
+            /* PT 스케줄 수정 시 X 버튼 크기 축소 */
+            .content-card td button[style*="background: #ff4444"] {
+                width: 18px !important;
+                height: 18px !important;
+                min-width: 18px !important;
+                padding: 0 !important;
+                font-size: 11px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                line-height: 1 !important;
+                border-radius: 3px !important;
+            }
+
             /* 캘린더 */
             .calendar {
                 overflow-x: auto !important;
@@ -851,12 +894,17 @@
                 align-items: center !important;
                 width: 100%;
                 padding: 5px 0 !important;
+                margin: 0 !important;
             }
 
             .modal-content input[type="checkbox"] {
                 flex-shrink: 0 !important;
-                margin-right: 4px !important;
-                margin-left: 0 !important;
+                margin: 0 4px 0 0 !important;
+                padding: 0 !important;
+            }
+
+            .modal-content .form-group label {
+                padding: 0 !important;
             }
 
             /* 폼 그룹 */
@@ -1034,6 +1082,18 @@
 
             .login-container h2 {
                 font-size: 22px;
+            }
+
+            /* 로그인 화면 체크박스 정렬 */
+            .login-container label {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: flex-start !important;
+            }
+
+            .login-container input[type="checkbox"] {
+                margin: 0 6px 0 0 !important;
+                flex-shrink: 0 !important;
             }
 
             /* 스크롤바 숨기기 (모바일) */
@@ -1777,13 +1837,13 @@
 
             return (
                 <div className="content-card">
-                    <div style={{
+                    <div className="pt-schedule-header" style={{
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
                         marginBottom: '20px'
                     }}>
-                        <h2>PT 스케줄</h2>
+                        <h2 className="pt-schedule-h2">PT 스케줄</h2>
                         <div className="calendar-nav">
                             <button className="nav-btn" onClick={handlePrevMonth}>◀ 이전달</button>
                             <button className="nav-btn" onClick={handleToday}>오늘</button>
@@ -1797,7 +1857,7 @@
                         fontWeight: 'bold',
                         marginBottom: '30px',
                         color: '#333'
-                    }}>
+                    }} className="pt-schedule-title">
                         {currentDate.getFullYear()}년 {currentDate.getMonth() + 1}월 PT 스케줄
                     </div>
 
@@ -1844,7 +1904,7 @@
                                                 </p>
                                             </div>
                                             {isPTScheduleEditor && (
-                                                <div style={{ display: 'flex', gap: '8px' }}>
+                                                <div className="pt-schedule-buttons" style={{ display: 'flex', gap: '8px' }}>
                                                     {isEditing ? (
                                                         <>
                                                             <button
@@ -2057,13 +2117,19 @@
                                                                                     <button
                                                                                         onClick={() => handleCancelSlot(slotKey)}
                                                                                         style={{
-                                                                                            padding: '2px 5px',
+                                                                                            width: '18px',
+                                                                                            height: '18px',
+                                                                                            padding: '0',
                                                                                             background: '#ff4444',
                                                                                             color: 'white',
                                                                                             border: 'none',
                                                                                             borderRadius: '3px',
                                                                                             cursor: 'pointer',
-                                                                                            fontSize: '10px'
+                                                                                            fontSize: '11px',
+                                                                                            display: 'inline-flex',
+                                                                                            alignItems: 'center',
+                                                                                            justifyContent: 'center',
+                                                                                            lineHeight: '1'
                                                                                         }}
                                                                                     >
                                                                                         ✕
@@ -2429,7 +2495,7 @@
                                     checked={rememberEmail}
                                     onChange={(e) => setRememberEmail(e.target.checked)}
                                     style={{
-                                        marginRight: '8px',
+                                        margin: '0 6px 0 0',
                                         cursor: 'pointer',
                                         width: '16px',
                                         height: '16px'
@@ -4570,7 +4636,7 @@
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'flex-start',
-                                                    padding: '5px 0',
+                                                    padding: '4px 0',
                                                     cursor: 'pointer',
                                                     borderRadius: '4px',
                                                     transition: 'background 0.2s',
@@ -4584,15 +4650,14 @@
                                                         checked={newLine.memberIds.includes(emp.id)}
                                                         onChange={() => handleMemberToggle(emp.id)}
                                                         style={{
-                                                            marginRight: '4px',
-                                                            marginLeft: '0',
+                                                            margin: '0 5px 0 0',
                                                             cursor: 'pointer',
-                                                            width: '18px',
-                                                            height: '18px',
+                                                            width: '16px',
+                                                            height: '16px',
                                                             flexShrink: 0
                                                         }}
                                                     />
-                                                    <span style={{fontSize: '13px', paddingLeft: '0'}}>
+                                                    <span style={{fontSize: '13px'}}>
                                                         {emp.name}
                                                         <span style={{color: '#666', fontSize: '11px', marginLeft: '4px'}}>
                                                             ({emp.email})
