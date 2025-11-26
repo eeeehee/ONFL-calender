@@ -4395,9 +4395,32 @@
                 if (!confirm('정말 삭제하시겠습니까?')) return;
 
                 try {
+                    // 1. 사원 삭제
                     await db.collection('employees').doc(employeeId).delete();
+                    
+                    // 2. 해당 사원이 포함된 결재선들 찾기
+                    const approvalLinesSnapshot = await db.collection('approvalLines')
+                        .where('memberIds', 'array-contains', employeeId)
+                        .get();
+                    
+                    // 3. 결재선의 memberIds에서 해당 사원 제거
+                    if (!approvalLinesSnapshot.empty) {
+                        const batch = db.batch();
+                        approvalLinesSnapshot.forEach(doc => {
+                            const currentMemberIds = doc.data().memberIds || [];
+                            const updatedMemberIds = currentMemberIds.filter(id => id !== employeeId);
+                            
+                            const lineRef = db.collection('approvalLines').doc(doc.id);
+                            batch.update(lineRef, {
+                                memberIds: updatedMemberIds,
+                                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
+                        });
+                        await batch.commit();
+                    }
+                    
                     // Note: Firebase Auth의 사용자 삭제는 Admin SDK가 필요합니다
-                    alert('사원이 삭제되었습니다.');
+                    alert('사원이 삭제되었습니다. 관련 결재선도 업데이트되었습니다.');
                     loadEmployees();
                 } catch (error) {
                     alert('삭제 실패: ' + error.message);
@@ -4512,6 +4535,7 @@
                             <table>
                                 <thead>
                                     <tr>
+                                        <th>번호</th>
                                         <th>이름</th>
                                         <th>이메일</th>
                                         <th>연락처</th>
@@ -4525,8 +4549,16 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {employees.map(emp => (
+                                    {employees
+                                        .sort((a, b) => {
+                                            // 입사일 기준 오름차순 정렬
+                                            const dateA = new Date(a.joinDate || '9999-12-31');
+                                            const dateB = new Date(b.joinDate || '9999-12-31');
+                                            return dateA - dateB;
+                                        })
+                                        .map((emp, index) => (
                                         <tr key={emp.id}>
+                                            <td style={{textAlign: 'center', fontWeight: '500'}}>{index + 1}</td>
                                             <td>
                                                 {editingEmployeeId === emp.id ? (
                                                     <input
@@ -4850,9 +4882,51 @@
             const loadApprovalLines = async () => {
                 const snapshot = await db.collection('approvalLines').get();
                 const lines = [];
-                snapshot.forEach(doc => {
-                    lines.push({ id: doc.id, ...doc.data() });
+                
+                // 사원 목록 먼저 로드 (정리를 위해)
+                const employeesSnapshot = await db.collection('employees').get();
+                const validEmployeeIds = new Set();
+                employeesSnapshot.forEach(doc => {
+                    validEmployeeIds.add(doc.id);
                 });
+                
+                // 정리가 필요한 결재선들을 위한 배치
+                const batch = db.batch();
+                let needsUpdate = false;
+                
+                snapshot.forEach(doc => {
+                    const lineData = doc.data();
+                    const originalMemberIds = lineData.memberIds || [];
+                    
+                    // 존재하는 사원만 필터링
+                    const validMemberIds = originalMemberIds.filter(id => validEmployeeIds.has(id));
+                    
+                    // memberIds가 변경된 경우 DB 업데이트 준비
+                    if (originalMemberIds.length !== validMemberIds.length) {
+                        const lineRef = db.collection('approvalLines').doc(doc.id);
+                        batch.update(lineRef, {
+                            memberIds: validMemberIds,
+                            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                        needsUpdate = true;
+                        
+                        // 업데이트된 데이터로 추가
+                        lines.push({ id: doc.id, ...lineData, memberIds: validMemberIds });
+                    } else {
+                        lines.push({ id: doc.id, ...lineData });
+                    }
+                });
+                
+                // DB 업데이트 실행
+                if (needsUpdate) {
+                    try {
+                        await batch.commit();
+                        console.log('삭제된 사원들이 결재선에서 제거되었습니다.');
+                    } catch (error) {
+                        console.error('결재선 정리 실패:', error);
+                    }
+                }
+                
                 setApprovalLines(lines);
             };
 
@@ -5057,7 +5131,15 @@
 
             const getMembers = (memberIds) => {
                 if (!memberIds || memberIds.length === 0) return '-';
-                return memberIds.map(id => getEmployeeName(id)).join(', ');
+                // 존재하는 사원만 필터링
+                const validMembers = memberIds
+                    .map(id => {
+                        const employee = employees.find(emp => emp.id === id);
+                        return employee ? employee.name : null;
+                    })
+                    .filter(name => name !== null);
+                
+                return validMembers.length > 0 ? validMembers.join(', ') : '-';
             };
 
             return (
