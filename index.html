@@ -39,6 +39,21 @@
                 font-size: 20px !important;
             }
             
+            .notification-bell {
+                font-size: 20px !important;
+                padding: 8px !important;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 40px;
+                height: 40px;
+            }
+            
+            .notification-badge {
+                top: 3px !important;
+                right: 3px !important;
+            }
+            
             .tabs {
                 overflow-x: auto;
                 flex-wrap: nowrap !important;
@@ -3350,7 +3365,12 @@
                 pendingApprovals: 0,
                 thisMonthLeaves: 0,
                 availableLeave: 0,
-                usedLeave: 0
+                usedLeave: 0,
+                todayWorkSchedules: 0,
+                monthWorkRate: 0,
+                monthRemoteRate: 0,
+                monthLeaveRate: 0,
+                employeeStats: []
             });
             const [recentActivities, setRecentActivities] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -3364,9 +3384,47 @@
                     // 전체 사원 수
                     const employeesSnapshot = await db.collection('employees').get();
                     const totalEmployees = employeesSnapshot.size;
+                    const employeesList = [];
+                    employeesSnapshot.forEach(doc => {
+                        employeesList.push({ id: doc.id, ...doc.data() });
+                    });
 
                     // 오늘 날짜
                     const today = new Date().toISOString().split('T')[0];
+                    const currentMonth = new Date().toISOString().slice(0, 7);
+
+                    // 이번 달 평일 수 계산
+                    const getWeekdaysInMonth = (yearMonth) => {
+                        const [year, month] = yearMonth.split('-').map(Number);
+                        const firstDay = new Date(year, month - 1, 1);
+                        const lastDay = new Date(year, month, 0);
+                        let weekdays = 0;
+                        
+                        for (let date = new Date(firstDay); date <= lastDay; date.setDate(date.getDate() + 1)) {
+                            const dayOfWeek = date.getDay();
+                            // 토요일(6), 일요일(0) 제외
+                            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                                weekdays++;
+                            }
+                        }
+                        return weekdays;
+                    };
+                    
+                    const weekdaysInMonth = getWeekdaysInMonth(currentMonth);
+                    const totalExpectedRecords = weekdaysInMonth * totalEmployees; // 평일수 × 총인원
+
+                    // 오늘 일정 캘린더에서 출근으로 등록된 인원 수 계산
+                    const calendarSnapshot = await db.collection('schedules').get();
+                    let todayWorkSchedules = 0;
+                    calendarSnapshot.forEach(doc => {
+                        const data = doc.data();
+                        if (data.date === today && (data.approvalStatus !== 'cancelled' && data.approvalStatus !== 'deletion-pending')) {
+                            const type = data.type || '';
+                            if (type === '출근' || type === '정상출근') {
+                                todayWorkSchedules++;
+                            }
+                        }
+                    });
 
                     // 오늘 연차 사용자
                     const leaveSnapshot = await db.collection('leaveUsage')
@@ -3375,7 +3433,6 @@
 
                     let todayLeaves = 0;
                     let thisMonthLeaves = 0;
-                    const currentMonth = new Date().toISOString().slice(0, 7);
 
                     leaveSnapshot.forEach(doc => {
                         const data = doc.data();
@@ -3387,6 +3444,76 @@
                             thisMonthLeaves++;
                         }
                     });
+
+                    // 이번 달 일정 통계 계산
+                    let monthWorkCount = 0;
+                    let monthRemoteCount = 0;
+                    let monthLeaveCount = 0;
+                    
+                    // 인원별 통계 계산 - 전체 사원 포함
+                    const employeeStatsMap = {};
+                    employeesList.forEach(emp => {
+                        employeeStatsMap[emp.id] = {
+                            name: emp.name,
+                            work: 0,
+                            remote: 0,
+                            leave: 0,
+                            total: 0
+                        };
+                    });
+
+                    calendarSnapshot.forEach(doc => {
+                        const data = doc.data();
+                        // 취소되거나 삭제 대기 중인 일정 제외
+                        if (data.approvalStatus === 'cancelled' || data.approvalStatus === 'deletion-pending') {
+                            return;
+                        }
+                        
+                        if (data.date && data.date.startsWith(currentMonth)) {
+                            const type = data.type || '';
+                            if (type === '출근' || type === '정상출근') {
+                                monthWorkCount++;
+                                if (employeeStatsMap[data.userId]) {
+                                    employeeStatsMap[data.userId].work++;
+                                    employeeStatsMap[data.userId].total++;
+                                }
+                            } else if (type === '재택' || type === '재택근무') {
+                                monthRemoteCount++;
+                                if (employeeStatsMap[data.userId]) {
+                                    employeeStatsMap[data.userId].remote++;
+                                    employeeStatsMap[data.userId].total++;
+                                }
+                            }
+                        }
+                    });
+
+                    leaveSnapshot.forEach(doc => {
+                        const data = doc.data();
+                        const leaveDate = data.startDate || data.date;
+                        if (leaveDate && leaveDate.startsWith(currentMonth)) {
+                            monthLeaveCount++;
+                            if (employeeStatsMap[data.userId]) {
+                                employeeStatsMap[data.userId].leave++;
+                                employeeStatsMap[data.userId].total++;
+                            }
+                        }
+                    });
+
+                    // 평일 × 총인원을 기준으로 비율 계산
+                    const monthWorkRate = totalExpectedRecords > 0 ? Math.round((monthWorkCount / totalExpectedRecords) * 100) : 0;
+                    const monthRemoteRate = totalExpectedRecords > 0 ? Math.round((monthRemoteCount / totalExpectedRecords) * 100) : 0;
+                    const monthLeaveRate = totalExpectedRecords > 0 ? Math.round((monthLeaveCount / totalExpectedRecords) * 100) : 0;
+
+                    // 인원별 통계 배열로 변환 - 전체 사원 표시 (기록 없어도) - 단, 관리자와 이병윤 제외
+                    const employeeStats = Object.values(employeeStatsMap)
+                        .filter(stat => stat.name !== '관리자' && stat.name !== '이병윤')
+                        .map(stat => ({
+                            ...stat,
+                            workRate: stat.total > 0 ? Math.round((stat.work / stat.total) * 100) : 0,
+                            remoteRate: stat.total > 0 ? Math.round((stat.remote / stat.total) * 100) : 0,
+                            leaveRate: stat.total > 0 ? Math.round((stat.leave / stat.total) * 100) : 0
+                        }))
+                        .sort((a, b) => a.name.localeCompare(b.name));
 
                     // 승인 대기 건수
                     let pendingApprovals = 0;
@@ -3423,7 +3550,12 @@
                         pendingApprovals,
                         thisMonthLeaves,
                         availableLeave,
-                        usedLeave
+                        usedLeave,
+                        todayWorkSchedules,
+                        monthWorkRate,
+                        monthRemoteRate,
+                        monthLeaveRate,
+                        employeeStats
                     });
                     setLoading(false);
                 } catch (error) {
@@ -3515,31 +3647,122 @@
                     </div>
 
                     {(isAdmin || isSubAdmin) && (
-                        <div className="stats-section">
-                            <h3 style={{marginBottom: '15px', color: '#666'}}>📈 통계</h3>
-                            <div className="stats-grid">
-                                <div className="stat-card">
-                                    <h4>평균 연차 사용률</h4>
-                                    <div className="value">
-                                        {stats.totalEmployees > 0
-                                            ? Math.round((stats.thisMonthLeaves / stats.totalEmployees) * 100)
-                                            : 0}%
+                        <>
+                            <div className="stats-section" style={{marginTop: '30px'}}>
+                                <h3 style={{marginBottom: '15px', color: '#666'}}>📈 이번달 통계</h3>
+                                <div className="stats-grid">
+                                    <div className="stat-card green">
+                                        <h4>오늘 출근 인원</h4>
+                                        <div className="value">{stats.todayWorkSchedules}</div>
+                                    </div>
+                                    <div className="stat-card blue">
+                                        <h4>이번달 출근 비율</h4>
+                                        <div className="value">{stats.monthWorkRate}%</div>
+                                    </div>
+                                    <div className="stat-card orange">
+                                        <h4>이번달 재택 비율</h4>
+                                        <div className="value">{stats.monthRemoteRate}%</div>
+                                    </div>
+                                    <div className="stat-card red">
+                                        <h4>이번달 휴가 비율</h4>
+                                        <div className="value">{stats.monthLeaveRate}%</div>
                                     </div>
                                 </div>
-                                <div className="stat-card blue">
-                                    <h4>이번 주 연차</h4>
-                                    <div className="value">{Math.floor(stats.thisMonthLeaves / 4)}</div>
-                                </div>
-                                <div className="stat-card orange">
-                                    <h4>승인 대기 중</h4>
-                                    <div className="value">{stats.pendingApprovals}</div>
-                                </div>
-                                <div className="stat-card red">
-                                    <h4>오늘 출근 인원</h4>
-                                    <div className="value">{stats.totalEmployees - stats.todayLeaves}</div>
-                                </div>
                             </div>
-                        </div>
+
+                            {stats.employeeStats.length > 0 && (
+                                <div style={{marginTop: '30px'}}>
+                                    <h3 style={{marginBottom: '15px', color: '#666'}}>👥 인원별 월 통계</h3>
+                                    <div style={{
+                                        overflowX: 'auto',
+                                        background: 'white',
+                                        borderRadius: '8px',
+                                        border: '1px solid #e0e0e0'
+                                    }}>
+                                        <table style={{
+                                            width: '100%',
+                                            borderCollapse: 'collapse',
+                                            fontSize: '14px'
+                                        }}>
+                                            <thead>
+                                                <tr style={{background: '#f5f5f5'}}>
+                                                    <th style={{
+                                                        padding: '12px',
+                                                        textAlign: 'left',
+                                                        borderBottom: '2px solid #e0e0e0',
+                                                        fontWeight: '600'
+                                                    }}>이름</th>
+                                                    <th style={{
+                                                        padding: '12px',
+                                                        textAlign: 'center',
+                                                        borderBottom: '2px solid #e0e0e0',
+                                                        fontWeight: '600'
+                                                    }}>총 기록</th>
+                                                    <th style={{
+                                                        padding: '12px',
+                                                        textAlign: 'center',
+                                                        borderBottom: '2px solid #e0e0e0',
+                                                        fontWeight: '600',
+                                                        color: '#4CAF50'
+                                                    }}>출근</th>
+                                                    <th style={{
+                                                        padding: '12px',
+                                                        textAlign: 'center',
+                                                        borderBottom: '2px solid #e0e0e0',
+                                                        fontWeight: '600',
+                                                        color: '#2196F3'
+                                                    }}>재택</th>
+                                                    <th style={{
+                                                        padding: '12px',
+                                                        textAlign: 'center',
+                                                        borderBottom: '2px solid #e0e0e0',
+                                                        fontWeight: '600',
+                                                        color: '#FF9800'
+                                                    }}>휴가</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {stats.employeeStats.map((stat, index) => (
+                                                    <tr key={index} style={{
+                                                        borderBottom: '1px solid #f0f0f0'
+                                                    }}>
+                                                        <td style={{
+                                                            padding: '12px',
+                                                            fontWeight: '500'
+                                                        }}>{stat.name}</td>
+                                                        <td style={{
+                                                            padding: '12px',
+                                                            textAlign: 'center'
+                                                        }}>{stat.total}일</td>
+                                                        <td style={{
+                                                            padding: '12px',
+                                                            textAlign: 'center',
+                                                            color: '#4CAF50'
+                                                        }}>
+                                                            {stat.work}일 ({stat.workRate}%)
+                                                        </td>
+                                                        <td style={{
+                                                            padding: '12px',
+                                                            textAlign: 'center',
+                                                            color: '#2196F3'
+                                                        }}>
+                                                            {stat.remote}일 ({stat.remoteRate}%)
+                                                        </td>
+                                                        <td style={{
+                                                            padding: '12px',
+                                                            textAlign: 'center',
+                                                            color: '#FF9800'
+                                                        }}>
+                                                            {stat.leave}일 ({stat.leaveRate}%)
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
 
                     <div style={{marginTop: '30px', padding: '20px', background: '#f9f9f9', borderRadius: '8px'}}>
@@ -4716,17 +4939,28 @@
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <span>{schedule.userName.split('@')[0]} - {schedule.type}{isLeaveType ? statusText : ''}</span>
-                                        {schedule.userId === user.uid && (
-                                            <button
-                                                className="delete-schedule-btn"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDeleteSchedule(schedule.id, schedule.date, schedule.type);
-                                                }}
-                                            >
-                                                ✕
-                                            </button>
-                                        )}
+                                        {schedule.userId === user.uid && (() => {
+                                            // 일정의 월과 현재 보고있는 캘린더의 월 비교
+                                            const scheduleMonth = schedule.date.slice(0, 7); // YYYY-MM
+                                            const currentCalendarMonth = `${year}-${String(month + 1).padStart(2, '0')}`; // YYYY-MM
+                                            const todayMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+                                            
+                                            // 현재 보고있는 캘린더가 이번 달이거나 미래 달인 경우에만 취소 버튼 표시
+                                            if (currentCalendarMonth >= todayMonth) {
+                                                return (
+                                                    <button
+                                                        className="delete-schedule-btn"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteSchedule(schedule.id, schedule.date, schedule.type);
+                                                        }}
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
                                     </div>
                                 );
                             })}
@@ -5917,7 +6151,7 @@
 
                     alert('사원이 추가되었습니다.');
                     setShowAddModal(false);
-                    setNewEmployee({ email: '', name: '', phone: '', joinDate: '', password: '', slackUserId: '' });
+                    setNewEmployee({ email: '', name: '', phone: '', joinDate: '', password: '', slackUserId: '', departmentId: '' });
                     loadEmployees();
                 } catch (error) {
                     alert('사원 추가 실패: ' + error.message);
@@ -7375,7 +7609,11 @@
                 const snapshot = await db.collection('employees').get();
                 const employeeList = [];
                 snapshot.forEach(doc => {
-                    employeeList.push({ id: doc.id, ...doc.data() });
+                    const data = doc.data();
+                    // 관리자와 이병윤 제외
+                    if (data.name !== '관리자' && data.name !== '이병윤') {
+                        employeeList.push({ id: doc.id, ...data });
+                    }
                 });
                 setEmployees(employeeList);
             };
