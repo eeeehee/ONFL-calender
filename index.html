@@ -12,6 +12,43 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <style>
+        :root {
+            /* 색상 시스템 */
+            --primary-color: #4CAF50;
+            --primary-dark: #45a049;
+            --secondary-color: #2196F3;
+            --accent-color: #9C27B0;
+            --danger-color: #f44336;
+            --warning-color: #FF9800;
+            --success-color: #4CAF50;
+            
+            /* 배경 색상 */
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --bg-tertiary: #fafafa;
+            
+            /* 텍스트 색상 */
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --text-tertiary: #999999;
+            
+            /* 간격 시스템 */
+            --spacing-xs: 4px;
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 32px;
+            
+            /* 그림자 */
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
+            --shadow-md: 0 2px 8px rgba(0,0,0,0.1);
+            --shadow-lg: 0 4px 12px rgba(0,0,0,0.15);
+            
+            /* 테두리 */
+            --border-radius: 8px;
+            --border-color: #e0e0e0;
+        }
+        
         * {
             margin: 0;
             padding: 0;
@@ -20,13 +57,20 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-            background: #f5f5f5;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
         }
 
         /* 모바일 최적화 */
         @media (max-width: 768px) {
+            body {
+                overflow-x: hidden;
+            }
+            
             .app-container {
                 padding: 10px !important;
+                overflow-x: hidden;
+                max-width: 100vw;
             }
             
             .header {
@@ -74,20 +118,27 @@
             
             .content-card {
                 padding: 15px !important;
+                overflow-x: hidden;
             }
             
             table {
                 font-size: 12px;
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
             }
             
             th, td {
                 padding: 8px 4px !important;
+                white-space: nowrap;
             }
             
             .modal-content {
                 width: 95% !important;
                 max-width: none !important;
                 margin: 20px auto !important;
+                max-height: 90vh;
+                overflow-y: auto;
             }
             
             .dashboard-grid {
@@ -95,7 +146,20 @@
             }
             
             .stats-grid {
-                grid-template-columns: 1fr !important;
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 8px !important;
+            }
+            
+            .stat-card {
+                padding: 12px !important;
+            }
+            
+            .stat-card h4 {
+                font-size: 11px !important;
+            }
+            
+            .stat-card .value {
+                font-size: 20px !important;
             }
             
             .search-filter-bar {
@@ -794,6 +858,303 @@
                 padding: 8px 12px;
                 flex: 1;
                 min-width: 70px;
+            }
+            
+            /* 모바일 캘린더 그리드 레이아웃 */
+            .calendar {
+                display: none !important; /* PC 테이블 캘린더 숨김 */
+            }
+            
+            .mobile-calendar {
+                display: block !important;
+            }
+            
+            .mobile-calendar-grid {
+                display: grid;
+                grid-template-columns: repeat(7, 1fr);
+                gap: 2px;
+                background: var(--bg-secondary);
+                padding: 4px;
+                border-radius: var(--border-radius);
+            }
+            
+            .mobile-weekday-header {
+                display: grid;
+                grid-template-columns: repeat(7, 1fr);
+                gap: 2px;
+                margin-bottom: 4px;
+            }
+            
+            .mobile-weekday {
+                text-align: center;
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text-secondary);
+                padding: 8px 0;
+            }
+            
+            .mobile-weekday.sunday {
+                color: #f44336;
+            }
+            
+            .mobile-weekday.saturday {
+                color: #2196F3;
+            }
+            
+            .mobile-date-cell {
+                aspect-ratio: 1;
+                background: white;
+                border-radius: 4px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: flex-start;
+                padding: 4px;
+                cursor: pointer;
+                transition: all 0.2s;
+                position: relative;
+            }
+            
+            .mobile-date-cell:active {
+                transform: scale(0.95);
+                background: var(--bg-tertiary);
+            }
+            
+            .mobile-date-cell.other-month {
+                background: var(--bg-tertiary);
+            }
+            
+            .mobile-date-cell.other-month .mobile-date-number {
+                color: var(--text-tertiary);
+            }
+            
+            .mobile-date-cell.today {
+                background: #e3f2fd;
+                border: 2px solid var(--secondary-color);
+            }
+            
+            .mobile-date-cell.today .mobile-date-number {
+                color: var(--secondary-color);
+                font-weight: bold;
+            }
+            
+            .mobile-date-cell.holiday {
+                background: #ffebee;
+            }
+            
+            .mobile-date-cell.sunday .mobile-date-number {
+                color: #f44336;
+            }
+            
+            .mobile-date-cell.saturday .mobile-date-number {
+                color: #2196F3;
+            }
+            
+            .mobile-date-number {
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--text-primary);
+                margin-bottom: 2px;
+            }
+            
+            .mobile-holiday-name {
+                font-size: 8px;
+                color: #f44336;
+                text-align: center;
+                line-height: 1.2;
+            }
+            
+            .mobile-schedule-dots {
+                display: flex;
+                gap: 2px;
+                flex-wrap: wrap;
+                justify-content: center;
+                margin-top: auto;
+            }
+            
+            .mobile-schedule-dot {
+                width: 4px;
+                height: 4px;
+                border-radius: 50%;
+                background: var(--primary-color);
+            }
+            
+            .mobile-schedule-dot.shared {
+                background: var(--accent-color);
+            }
+            
+            .mobile-schedule-dot.leave {
+                background: #f44336;
+            }
+            
+            .mobile-schedule-dot.remote {
+                background: var(--warning-color);
+            }
+            
+            /* 선택된 날짜 일정 목록 */
+            .mobile-selected-date-schedules {
+                margin-top: var(--spacing-md);
+                background: white;
+                border-radius: var(--border-radius);
+                padding: var(--spacing-md);
+                box-shadow: var(--shadow-md);
+            }
+            
+            .mobile-selected-date-schedules h3 {
+                font-size: 16px;
+                margin-bottom: var(--spacing-md);
+                color: var(--text-primary);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .mobile-schedule-list {
+                display: flex;
+                flex-direction: column;
+                gap: var(--spacing-sm);
+            }
+            
+            .mobile-schedule-item {
+                padding: var(--spacing-md);
+                border-radius: var(--border-radius);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 14px;
+            }
+            
+            .mobile-schedule-item.shared {
+                background: #f3e5f5;
+                border-left: 4px solid var(--accent-color);
+            }
+            
+            .mobile-schedule-item.work {
+                background: #e3f2fd;
+                border-left: 4px solid var(--secondary-color);
+            }
+            
+            .mobile-schedule-item.remote {
+                background: #fff3e0;
+                border-left: 4px solid var(--warning-color);
+            }
+            
+            .mobile-schedule-item.leave {
+                background: #ffebee;
+                border-left: 4px solid var(--danger-color);
+            }
+            
+            .mobile-schedule-info {
+                flex: 1;
+            }
+            
+            .mobile-schedule-user {
+                font-weight: 600;
+                margin-bottom: 4px;
+            }
+            
+            .mobile-schedule-type {
+                font-size: 12px;
+                color: var(--text-secondary);
+            }
+            
+            .mobile-schedule-actions button {
+                background: transparent;
+                border: none;
+                color: var(--danger-color);
+                width: auto;
+                height: auto;
+                padding: 4px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 20px;
+                font-weight: bold;
+            }
+            
+            .mobile-schedule-actions button:active {
+                transform: scale(0.9);
+            }
+            
+            .daily-schedules {
+                display: none; /* PC용 일정 목록 숨김 */
+            }
+            
+            .mobile-selected-date-schedules {
+                display: block !important;
+            }
+            
+            /* 사원 관리 모바일 카드 */
+            .employee-list {
+                display: none !important;
+            }
+            
+            .mobile-employee-cards,
+            .mobile-approval-cards {
+                display: block !important;
+            }
+            
+            .mobile-employee-card {
+                background: white;
+                border-radius: var(--border-radius);
+                padding: var(--spacing-md);
+                margin-bottom: var(--spacing-sm);
+                box-shadow: var(--shadow-sm);
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            
+            .mobile-employee-card:active {
+                transform: scale(0.98);
+                box-shadow: var(--shadow-md);
+            }
+            
+            .mobile-employee-card-header {
+                display: flex;
+                align-items: center;
+                gap: var(--spacing-sm);
+                margin-bottom: var(--spacing-sm);
+                padding-bottom: var(--spacing-sm);
+                border-bottom: 1px solid var(--border-color);
+            }
+            
+            .mobile-employee-number,
+            .mobile-approval-number {
+                color: var(--text-secondary);
+                font-size: 14px;
+                font-weight: 600;
+            }
+            
+            .mobile-employee-name {
+                font-size: 16px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            
+            .mobile-employee-card-body {
+                display: flex;
+                flex-direction: column;
+                gap: var(--spacing-xs);
+            }
+            
+            .mobile-employee-card-row {
+                display: flex;
+                align-items: center;
+                gap: var(--spacing-sm);
+                font-size: 14px;
+            }
+            
+            .mobile-employee-label {
+                font-size: 16px;
+            }
+            
+            .mobile-employee-value {
+                color: var(--text-secondary);
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
         }
 
@@ -4556,6 +4917,7 @@
             const [filterLeaveType, setFilterLeaveType] = useState('all');
             const [sharedEvents, setSharedEvents] = useState({});
             const [showSharedEventModal, setShowSharedEventModal] = useState(false);
+            const [lastClickedDate, setLastClickedDate] = useState(null);
 
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth();
@@ -4649,8 +5011,24 @@
 
             const handleDateClick = (day) => {
                 const dateStr = formatDate(year, month, day);
-                setSelectedDate(dateStr);
-                setShowScheduleModal(true);
+                
+                // 모바일 감지
+                const isMobile = window.innerWidth <= 768;
+                
+                if (isMobile) {
+                    // 모바일: 같은 날짜를 두 번 클릭하면 일정 등록 모달 열기
+                    if (lastClickedDate === dateStr) {
+                        setShowScheduleModal(true);
+                    } else {
+                        // 첫 번째 클릭: 일정만 표시
+                        setSelectedDate(dateStr);
+                        setLastClickedDate(dateStr);
+                    }
+                } else {
+                    // PC: 바로 일정 등록 모달 열기
+                    setSelectedDate(dateStr);
+                    setShowScheduleModal(true);
+                }
             };
 
                         const handleSaveSchedule = async (date, type) => {
@@ -5133,6 +5511,81 @@
                 return weeks;
             };
 
+            const renderMobileCalendar = () => {
+                const daysInMonth = getDaysInMonth(year, month);
+                const firstDay = getFirstDayOfMonth(year, month);
+                const cells = [];
+                
+                const today = new Date();
+                const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+
+                // 이전 달의 빈 칸
+                for (let i = 0; i < firstDay; i++) {
+                    cells.push(
+                        <div key={`empty-${i}`} className="mobile-date-cell other-month">
+                            <span className="mobile-date-number"></span>
+                        </div>
+                    );
+                }
+
+                // 현재 달의 날짜
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = formatDate(year, month, day);
+                    const rawDaySchedules = schedules[dateStr] || [];
+                    let daySchedules = rawDaySchedules.filter(s => s.approvalStatus !== 'cancelled' && s.approvalStatus !== 'deletion-pending');
+                    
+                    // 필터 적용
+                    if (filterEmployee !== 'all') {
+                        daySchedules = daySchedules.filter(s => s.userId === filterEmployee);
+                    }
+                    if (filterLeaveType !== 'all') {
+                        daySchedules = daySchedules.filter(s => s.type === filterLeaveType);
+                    }
+                    
+                    const sharedEventsList = sharedEvents[dateStr] || [];
+                    const isToday = isCurrentMonth && today.getDate() === day;
+                    const isHoliday = holidays[dateStr];
+                    const dayOfWeek = new Date(year, month, day).getDay();
+                    const isSunday = dayOfWeek === 0;
+                    const isSaturday = dayOfWeek === 6;
+
+                    let cellClass = 'mobile-date-cell';
+                    if (isToday) cellClass += ' today';
+                    if (isHoliday) cellClass += ' holiday';
+                    if (isSunday) cellClass += ' sunday';
+                    if (isSaturday) cellClass += ' saturday';
+
+                    cells.push(
+                        <div
+                            key={day}
+                            className={cellClass}
+                            onClick={() => handleDateClick(day)}
+                        >
+                            <span className="mobile-date-number">{day}</span>
+                            {isHoliday && <div className="mobile-holiday-name">{isHoliday}</div>}
+                            <div className="mobile-schedule-dots">
+                                {sharedEventsList.map((_, idx) => (
+                                    <div key={`shared-${idx}`} className="mobile-schedule-dot shared"></div>
+                                ))}
+                                {daySchedules.slice(0, 3).map((schedule, idx) => {
+                                    const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(schedule.type);
+                                    const isRemote = schedule.type === '재택' || schedule.type === '재택근무';
+                                    let dotClass = 'mobile-schedule-dot';
+                                    if (isLeaveType) dotClass += ' leave';
+                                    else if (isRemote) dotClass += ' remote';
+                                    return <div key={idx} className={dotClass}></div>;
+                                })}
+                                {(sharedEventsList.length + daySchedules.length) > 3 && (
+                                    <span style={{fontSize: '8px', color: '#999'}}>+</span>
+                                )}
+                            </div>
+                        </div>
+                    );
+                }
+
+                return cells;
+            };
+
             const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
 
             return (
@@ -5203,6 +5656,96 @@
                         </tbody>
                     </table>
                     </div>
+
+                    {/* 모바일 캘린더 */}
+                    <div className="mobile-calendar" style={{display: 'none'}}>
+                        <div className="mobile-weekday-header">
+                            <div className="mobile-weekday sunday">일</div>
+                            <div className="mobile-weekday">월</div>
+                            <div className="mobile-weekday">화</div>
+                            <div className="mobile-weekday">수</div>
+                            <div className="mobile-weekday">목</div>
+                            <div className="mobile-weekday">금</div>
+                            <div className="mobile-weekday saturday">토</div>
+                        </div>
+                        <div className="mobile-calendar-grid">
+                            {renderMobileCalendar()}
+                        </div>
+                    </div>
+
+                    {/* 모바일: 선택된 날짜 일정 */}
+                    {selectedDate && (
+                        <div className="mobile-selected-date-schedules" style={{display: 'none'}}>
+                            <h3>📅 {selectedDate}</h3>
+                            {(sharedEvents[selectedDate] || []).length === 0 && selectedDaySchedules.length === 0 ? (
+                                <div style={{textAlign: 'center', color: '#999', padding: '20px'}}>
+                                    등록된 일정이 없습니다
+                                </div>
+                            ) : (
+                                <div className="mobile-schedule-list">
+                                    {/* 공유일정 */}
+                                    {(sharedEvents[selectedDate] || []).map((event, idx) => (
+                                        <div key={`shared-${idx}`} className="mobile-schedule-item shared">
+                                            <div className="mobile-schedule-info">
+                                                <div className="mobile-schedule-user">📌 공유일정</div>
+                                                <div className="mobile-schedule-type">{event.title}</div>
+                                            </div>
+                                            {(employeeInfo?.isSubAdmin || employeeInfo?.isApprover) && (
+                                                <div className="mobile-schedule-actions">
+                                                    <button onClick={() => handleDeleteSharedEvent(event.id)}>✕</button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                    
+                                    {/* 개인일정 */}
+                                    {selectedDaySchedules.map((schedule, idx) => {
+                                        const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(schedule.type);
+                                        const isRemote = schedule.type === '재택' || schedule.type === '재택근무';
+                                        let itemClass = 'mobile-schedule-item';
+                                        if (isLeaveType) itemClass += ' leave';
+                                        else if (isRemote) itemClass += ' remote';
+                                        else itemClass += ' work';
+                                        
+                                        const statusText = schedule.approvalStatus === 'approved' ? '승인완료' :
+                                                          schedule.approvalStatus === 'rejected' ? '반려' :
+                                                          schedule.approvalStatus === 'pending' ? '승인대기' :
+                                                          schedule.approvalStatus === 'deletion-pending' ? '취소대기' :
+                                                          schedule.approvalStatus === 'cancelled' ? '취소됨' : '';
+                                        
+                                        return (
+                                            <div key={idx} className={itemClass}>
+                                                <div className="mobile-schedule-info">
+                                                    <div className="mobile-schedule-user">
+                                                        {schedule.userName.split('@')[0]}
+                                                    </div>
+                                                    <div className="mobile-schedule-type">
+                                                        {schedule.type}
+                                                        {isLeaveType && statusText && ` (${statusText})`}
+                                                    </div>
+                                                </div>
+                                                {schedule.userId === user.uid && (() => {
+                                                    const scheduleMonth = schedule.date.slice(0, 7);
+                                                    const currentCalendarMonth = `${year}-${String(month + 1).padStart(2, '0')}`;
+                                                    const today = new Date();
+                                                    const todayMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+                                                    
+                                                    if (currentCalendarMonth >= todayMonth) {
+                                                        return (
+                                                            <div className="mobile-schedule-actions">
+                                                                <button onClick={() => handleDeleteSchedule(schedule.id, schedule.date, schedule.type)}>✕</button>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return null;
+                                                })()}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {selectedDate && selectedDaySchedules.length > 0 && (
                         <div className="daily-schedules">
@@ -6239,6 +6782,10 @@
             const [searchTerm, setSearchTerm] = useState('');
             const [filterRole, setFilterRole] = useState('all');
             const [filterDepartment, setFilterDepartment] = useState('all');
+            const [showDetailModal, setShowDetailModal] = useState(false);
+            const [selectedEmployee, setSelectedEmployee] = useState(null);
+            const [isEditingDetail, setIsEditingDetail] = useState(false);
+            const [editedEmployee, setEditedEmployee] = useState({});
             const [newEmployee, setNewEmployee] = useState({
                 email: '',
                 name: '',
@@ -6875,6 +7422,35 @@
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* 모바일 사원 카드 레이아웃 */}
+                        <div className="mobile-employee-cards" style={{display: 'none'}}>
+                            {getFilteredEmployees().map((emp, index) => (
+                                <div 
+                                    key={emp.id} 
+                                    className="mobile-employee-card"
+                                    onClick={() => {
+                                        setSelectedEmployee(emp);
+                                        setShowDetailModal(true);
+                                    }}
+                                >
+                                    <div className="mobile-employee-card-header">
+                                        <span className="mobile-employee-number">{index + 1}.</span>
+                                        <span className="mobile-employee-name">{emp.name}</span>
+                                    </div>
+                                    <div className="mobile-employee-card-body">
+                                        <div className="mobile-employee-card-row">
+                                            <span className="mobile-employee-label">📧</span>
+                                            <span className="mobile-employee-value">{emp.email}</span>
+                                        </div>
+                                        <div className="mobile-employee-card-row">
+                                            <span className="mobile-employee-label">📱</span>
+                                            <span className="mobile-employee-value">{emp.phone || '-'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
                     {showAddModal && (
@@ -6942,6 +7518,190 @@
                                     <button className="btn-primary" onClick={handleAddEmployee}>
                                         추가
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 모바일 사원 상세보기 모달 */}
+                    {showDetailModal && selectedEmployee && (
+                        <div className="modal" onClick={() => {
+                            setShowDetailModal(false);
+                            setIsEditingDetail(false);
+                        }}>
+                            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{maxHeight: '90vh', overflowY: 'auto'}}>
+                                <h3>{selectedEmployee.name} {isEditingDetail ? '수정' : '상세 정보'}</h3>
+                                
+                                <div className="form-group">
+                                    <label>이름</label>
+                                    {isEditingDetail ? (
+                                        <input
+                                            type="text"
+                                            value={editedEmployee.name || selectedEmployee.name}
+                                            onChange={(e) => setEditedEmployee({...editedEmployee, name: e.target.value})}
+                                            style={{width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px'}}
+                                        />
+                                    ) : (
+                                        <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                            {selectedEmployee.name}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="form-group">
+                                    <label>이메일</label>
+                                    {isEditingDetail ? (
+                                        <input
+                                            type="email"
+                                            value={editedEmployee.email || selectedEmployee.email}
+                                            onChange={(e) => setEditedEmployee({...editedEmployee, email: e.target.value})}
+                                            style={{width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px'}}
+                                        />
+                                    ) : (
+                                        <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                            {selectedEmployee.email}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="form-group">
+                                    <label>연락처</label>
+                                    {isEditingDetail ? (
+                                        <input
+                                            type="text"
+                                            value={editedEmployee.phone !== undefined ? editedEmployee.phone : (selectedEmployee.phone || '')}
+                                            onChange={(e) => setEditedEmployee({...editedEmployee, phone: formatPhoneNumber(e.target.value)})}
+                                            maxLength="13"
+                                            placeholder="010-1234-5678"
+                                            style={{width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px'}}
+                                        />
+                                    ) : (
+                                        <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                            {selectedEmployee.phone || '-'}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="form-group">
+                                    <label>입사일</label>
+                                    {isEditingDetail ? (
+                                        <input
+                                            type="date"
+                                            value={editedEmployee.joinDate || selectedEmployee.joinDate || ''}
+                                            onChange={(e) => setEditedEmployee({...editedEmployee, joinDate: e.target.value})}
+                                            style={{width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px'}}
+                                        />
+                                    ) : (
+                                        <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                            {selectedEmployee.joinDate || '-'}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="form-group">
+                                    <label>부서</label>
+                                    <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                        {getDepartmentName(selectedEmployee.departmentId)}
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label>Slack ID</label>
+                                    {isEditingDetail ? (
+                                        <input
+                                            type="text"
+                                            value={editedEmployee.slackUserId !== undefined ? editedEmployee.slackUserId : (selectedEmployee.slackUserId || '')}
+                                            onChange={(e) => setEditedEmployee({...editedEmployee, slackUserId: e.target.value})}
+                                            placeholder="U01234ABCDE"
+                                            style={{width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px'}}
+                                        />
+                                    ) : (
+                                        <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                            {selectedEmployee.slackUserId || '-'}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="form-group">
+                                    <label>권한</label>
+                                    <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                        {selectedEmployee.isSubAdmin && <span style={{marginRight: '8px', padding: '4px 8px', background: '#009688', color: 'white', borderRadius: '4px', fontSize: '12px'}}>부관리자</span>}
+                                        {selectedEmployee.isApprover && <span style={{marginRight: '8px', padding: '4px 8px', background: '#2196F3', color: 'white', borderRadius: '4px', fontSize: '12px'}}>승인자</span>}
+                                        {selectedEmployee.isPTScheduleEditor && <span style={{marginRight: '8px', padding: '4px 8px', background: '#FF9800', color: 'white', borderRadius: '4px', fontSize: '12px'}}>PT 편집자</span>}
+                                        {!selectedEmployee.isSubAdmin && !selectedEmployee.isApprover && !selectedEmployee.isPTScheduleEditor && <span style={{color: '#999'}}>일반 사원</span>}
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label>결재선</label>
+                                    <div style={{padding: '10px', background: '#f5f5f5', borderRadius: '4px'}}>
+                                        {(() => {
+                                            const line = approvalLines.find(line => line.memberIds && line.memberIds.includes(selectedEmployee.id));
+                                            return line ? line.name : '미배정';
+                                        })()}
+                                    </div>
+                                </div>
+
+                                <div className="modal-buttons">
+                                    {isEditingDetail ? (
+                                        <>
+                                            <button 
+                                                className="btn-secondary" 
+                                                onClick={() => {
+                                                    setIsEditingDetail(false);
+                                                    setEditedEmployee({});
+                                                }}
+                                            >
+                                                취소
+                                            </button>
+                                            <button 
+                                                className="btn-primary" 
+                                                onClick={async () => {
+                                                    try {
+                                                        const updateData = {
+                                                            name: editedEmployee.name || selectedEmployee.name,
+                                                            email: editedEmployee.email || selectedEmployee.email,
+                                                            phone: editedEmployee.phone !== undefined ? editedEmployee.phone : selectedEmployee.phone,
+                                                            joinDate: editedEmployee.joinDate || selectedEmployee.joinDate,
+                                                            slackUserId: editedEmployee.slackUserId !== undefined ? editedEmployee.slackUserId : selectedEmployee.slackUserId,
+                                                        };
+
+                                                        await db.collection('employees').doc(selectedEmployee.id).update(updateData);
+                                                        alert('수정되었습니다.');
+                                                        setIsEditingDetail(false);
+                                                        setEditedEmployee({});
+                                                        setShowDetailModal(false);
+                                                        loadEmployees();
+                                                    } catch (error) {
+                                                        alert('수정 실패: ' + error.message);
+                                                    }
+                                                }}
+                                            >
+                                                저장
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <button 
+                                                className="btn-secondary" 
+                                                onClick={() => {
+                                                    setShowDetailModal(false);
+                                                    setIsEditingDetail(false);
+                                                }}
+                                            >
+                                                닫기
+                                            </button>
+                                            <button 
+                                                className="btn-primary" 
+                                                onClick={() => {
+                                                    setIsEditingDetail(true);
+                                                    setEditedEmployee({});
+                                                }}
+                                            >
+                                                수정
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -7302,6 +8062,68 @@
                                     )}
                                 </tbody>
                             </table>
+                        </div>
+
+                        {/* 모바일 결재선 카드 레이아웃 */}
+                        <div className="mobile-approval-cards" style={{display: 'none'}}>
+                            {approvalLines.length === 0 ? (
+                                <div style={{textAlign: 'center', color: '#999', padding: '30px'}}>
+                                    등록된 결재선이 없습니다.
+                                </div>
+                            ) : (
+                                approvalLines.map((line, index) => (
+                                    <div key={line.id} className="mobile-employee-card">
+                                        <div className="mobile-employee-card-header">
+                                            <span className="mobile-approval-number">{index + 1}.</span>
+                                            <span className="mobile-employee-name">{line.name}</span>
+                                        </div>
+                                        <div className="mobile-employee-card-body">
+                                            <div className="mobile-employee-card-row">
+                                                <span className="mobile-employee-label">👤 승인자:</span>
+                                                <span className="mobile-employee-value">{getEmployeeName(line.approverId)}</span>
+                                            </div>
+                                            <div className="mobile-employee-card-row" style={{alignItems: 'flex-start'}}>
+                                                <span className="mobile-employee-label">👥 인원:</span>
+                                                <span className="mobile-employee-value" style={{whiteSpace: 'normal'}}>
+                                                    {getMembers(line.memberIds)}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div style={{display: 'flex', gap: '8px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #eee'}}>
+                                            <button
+                                                onClick={() => handleEditApprovalLine(line)}
+                                                style={{
+                                                    flex: 1,
+                                                    padding: '10px',
+                                                    background: '#2196F3',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '14px'
+                                                }}
+                                            >
+                                                수정
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteApprovalLine(line.id)}
+                                                style={{
+                                                    flex: 1,
+                                                    padding: '10px',
+                                                    background: '#f44336',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '14px'
+                                                }}
+                                            >
+                                                삭제
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
 
