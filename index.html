@@ -116,6 +116,29 @@
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
             }
+            
+            .calendar-header {
+                flex-direction: column;
+                align-items: flex-start !important;
+                gap: 10px;
+            }
+            
+            .calendar-header h2 {
+                font-size: 18px !important;
+                margin: 0;
+            }
+            
+            .calendar-nav {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .nav-btn {
+                padding: 8px 12px !important;
+                font-size: 12px !important;
+                flex: 1;
+                white-space: nowrap;
+            }
         }
 
         .app-container {
@@ -746,6 +769,30 @@
             .department-grid {
                 grid-template-columns: 1fr;
             }
+
+            .calendar-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
+            }
+
+            .calendar-header h2 {
+                font-size: 18px;
+                margin: 0;
+            }
+
+            .calendar-nav {
+                width: 100%;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .nav-btn {
+                font-size: 12px;
+                padding: 8px 12px;
+                flex: 1;
+                min-width: 70px;
+            }
         }
 
         .calendar-header {
@@ -884,6 +931,11 @@
         .schedule-반차오후 { background: #e1f5fe; color: #0277bd; }
         .schedule-여름휴가 { background: #e0f2f1; color: #00796b; }
         .schedule-겨울휴가 { background: #e8eaf6; color: #3f51b5; }
+        .schedule-shared { 
+            background: #9C27B0 !important; 
+            color: white !important; 
+            font-weight: bold;
+        }
 
         .daily-schedules {
             margin-top: 30px;
@@ -4491,6 +4543,8 @@
             const [employeeInfo, setEmployeeInfo] = useState(null);
             const [filterEmployee, setFilterEmployee] = useState('all');
             const [filterLeaveType, setFilterLeaveType] = useState('all');
+            const [sharedEvents, setSharedEvents] = useState({});
+            const [showSharedEventModal, setShowSharedEventModal] = useState(false);
 
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth();
@@ -4498,6 +4552,7 @@
             useEffect(() => {
                 loadEmployeeInfo();
                 loadSchedules();
+                loadSharedEvents();
             }, [year, month]);
 
             const loadEmployeeInfo = async () => {
@@ -4547,6 +4602,30 @@
                 });
 
                 setSchedules(scheduleData);
+            };
+
+            const loadSharedEvents = async () => {
+                const startDate = formatDate(year, month, 1);
+                const endDate = formatDate(year, month, getDaysInMonth(year, month));
+
+                const snapshot = await db.collection('sharedEvents')
+                    .where('date', '>=', startDate)
+                    .where('date', '<=', endDate)
+                    .get();
+
+                const eventData = {};
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (!eventData[data.date]) {
+                        eventData[data.date] = [];
+                    }
+                    eventData[data.date].push({
+                        id: doc.id,
+                        ...data
+                    });
+                });
+
+                setSharedEvents(eventData);
             };
 
             const handlePrevMonth = () => {
@@ -4879,6 +4958,36 @@
                 }
             };
 
+            const handleSaveSharedEvent = async (date, title) => {
+                try {
+                    await db.collection('sharedEvents').add({
+                        date: date,
+                        title: title,
+                        createdBy: user.uid,
+                        createdByName: user.displayName || user.email,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    alert('공유일정이 등록되었습니다.');
+                    setShowSharedEventModal(false);
+                    loadSharedEvents();
+                } catch (error) {
+                    alert('등록 실패: ' + error.message);
+                }
+            };
+
+            const handleDeleteSharedEvent = async (eventId) => {
+                if (!confirm('이 공유일정을 삭제하시겠습니까?')) return;
+
+                try {
+                    await db.collection('sharedEvents').doc(eventId).delete();
+                    alert('공유일정이 삭제되었습니다.');
+                    loadSharedEvents();
+                } catch (error) {
+                    alert('삭제 실패: ' + error.message);
+                }
+            };
+
             const renderCalendar = () => {
                 const daysInMonth = getDaysInMonth(year, month);
                 const firstDay = getFirstDayOfMonth(year, month);
@@ -4923,6 +5032,35 @@
                         >
                             <div className="date-number">{day}</div>
                             {isHoliday && <div className="holiday-name">{isHoliday}</div>}
+                            
+                            {/* 공유일정 최상단 표시 */}
+                            {sharedEvents[dateStr] && sharedEvents[dateStr].map((event, idx) => (
+                                <div
+                                    key={`shared-${idx}`}
+                                    className="schedule-item schedule-shared"
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                        background: '#9C27B0',
+                                        color: 'white',
+                                        fontWeight: 'bold'
+                                    }}
+                                >
+                                    <span>📌 {event.title}</span>
+                                    {(employeeInfo?.isSubAdmin || employeeInfo?.isApprover) && (
+                                        <button
+                                            className="delete-schedule-btn"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteSharedEvent(event.id);
+                                            }}
+                                        >
+                                            ✕
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                            
+                            {/* 개인 일정 표시 */}
                             {daySchedules.map((schedule, idx) => {
                                 // 연차 관련 일정인지 확인
                                 const isLeaveType = ['연차', '반차(오전)', '반차(오후)', '여름휴가', '겨울휴가'].includes(schedule.type);
@@ -4991,6 +5129,16 @@
                     <div className="calendar-header">
                         <h2>{year}년 {monthNames[month]}</h2>
                         <div className="calendar-nav">
+                            <button 
+                                className="nav-btn" 
+                                onClick={() => setShowSharedEventModal(true)}
+                                style={{
+                                    background: '#9C27B0',
+                                    marginRight: '10px'
+                                }}
+                            >
+                                공유일정등록
+                            </button>
                             <button className="nav-btn" onClick={handlePrevMonth}>이전</button>
                             <button className="nav-btn" onClick={handleNextMonth}>다음</button>
                         </div>
@@ -5070,6 +5218,106 @@
                             userName={user.displayName || user.email}
                         />
                     )}
+
+                    {showSharedEventModal && (
+                        <SharedEventModal
+                            year={year}
+                            month={month}
+                            onSave={handleSaveSharedEvent}
+                            onClose={() => setShowSharedEventModal(false)}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // 공유일정 등록 모달 컴포넌트
+        function SharedEventModal({ year, month, onSave, onClose }) {
+            const [selectedDate, setSelectedDate] = useState('');
+            const [title, setTitle] = useState('');
+
+            const handleSave = () => {
+                if (!selectedDate) {
+                    alert('날짜를 선택해주세요.');
+                    return;
+                }
+                if (!title.trim()) {
+                    alert('일정 내용을 입력해주세요.');
+                    return;
+                }
+                onSave(selectedDate, title);
+            };
+
+            // 해당 월의 일자 목록 생성
+            const getDaysInMonth = (year, month) => {
+                return new Date(year, month + 1, 0).getDate();
+            };
+
+            const daysInMonth = getDaysInMonth(year, month);
+            const days = [];
+            for (let i = 1; i <= daysInMonth; i++) {
+                days.push(i);
+            }
+
+            return (
+                <div className="modal" onClick={onClose}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                        <h3>공유일정 등록</h3>
+                        <div className="form-group">
+                            <label>날짜 선택</label>
+                            <select
+                                value={selectedDate}
+                                onChange={(e) => setSelectedDate(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    border: '1px solid #ddd',
+                                    borderRadius: '4px',
+                                    fontSize: '14px'
+                                }}
+                            >
+                                <option value="">날짜를 선택하세요</option>
+                                {days.map(day => {
+                                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                                    return (
+                                        <option key={day} value={dateStr}>
+                                            {year}년 {month + 1}월 {day}일
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label>일정 내용</label>
+                            <input
+                                type="text"
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                placeholder="예: 전사 회식, 휴무일, 행사 등"
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    border: '1px solid #ddd',
+                                    borderRadius: '4px',
+                                    fontSize: '14px'
+                                }}
+                            />
+                        </div>
+                        <div className="modal-buttons">
+                            <button className="btn-secondary" onClick={onClose}>
+                                취소
+                            </button>
+                            <button 
+                                className="btn-primary" 
+                                onClick={handleSave}
+                                style={{
+                                    background: '#9C27B0'
+                                }}
+                            >
+                                등록
+                            </button>
+                        </div>
+                    </div>
                 </div>
             );
         }
